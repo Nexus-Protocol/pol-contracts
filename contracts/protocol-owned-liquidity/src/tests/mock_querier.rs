@@ -1,7 +1,7 @@
 use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR};
 use cosmwasm_std::{
-    from_slice, to_binary, BankQuery, Binary, Coin, ContractResult, Decimal, OwnedDeps, Querier,
-    QuerierResult, QueryRequest, SystemError, SystemResult, Uint128, WasmQuery,
+    from_slice, to_binary, Addr, BankQuery, Binary, Coin, ContractResult, Decimal, OwnedDeps,
+    Querier, QuerierResult, QueryRequest, SystemError, SystemResult, Uint128, WasmQuery,
 };
 use cosmwasm_storage::to_length_prefixed;
 use cw20::TokenInfoResponse;
@@ -92,17 +92,34 @@ impl WasmMockQuerier {
 
                 if key.starts_with(&prefix_balance) {
                     let key_address: &[u8] = &key[prefix_balance.len()..];
-                    SystemResult::Ok(ContractResult::from(to_binary(
-                        &self
-                            .token_balances
-                            .get(contract_addr)
-                            .cloned()
-                            .unwrap_or_default()
-                            .get(std::str::from_utf8(key_address).unwrap())
-                            .cloned()
-                            .unwrap_or_default(),
-                    )))
-                } else if key == b"token_info" {
+                    let address = Addr::unchecked(std::str::from_utf8(key_address).unwrap());
+
+                    let balances: &HashMap<String, Uint128> =
+                        match self.token_balances.get(contract_addr) {
+                            Some(balances) => balances,
+                            None => {
+                                return SystemResult::Err(SystemError::InvalidRequest {
+                                    error: format!(
+                                        "no balance info exists for the contract {}",
+                                        contract_addr
+                                    ),
+                                    request: key.into(),
+                                })
+                            }
+                        };
+
+                    let balance = match balances.get(address.as_str()) {
+                        Some(v) => v,
+                        None => {
+                            return SystemResult::Err(SystemError::InvalidRequest {
+                                error: "balance not found".to_owned(),
+                                request: key.into(),
+                            })
+                        }
+                    };
+
+                    SystemResult::Ok(ContractResult::from(to_binary(balance)))
+                } else if key == b"token_info" || key == to_length_prefixed(b"token_info") {
                     SystemResult::Ok(ContractResult::from(to_binary(&TokenInfoResponse {
                         name: String::new(),
                         symbol: String::new(),

@@ -262,25 +262,71 @@ fn native_asset(denom: String) -> AssetInfo {
     AssetInfo::NativeToken { denom }
 }
 
-fn query_token_balance(
-    querier: &QuerierWrapper,
-    contract: &Addr,
-    account: &Addr,
-) -> StdResult<Uint128> {
-    // astroport::querier::query_token_balance(querier, contract.clone(), account.clone())
+fn query_token_balance(deps: Deps, contract_addr: &Addr, account_addr: &Addr) -> Uint128 {
+    if let Ok(balance) = query_token_balance_legacy(deps, contract_addr, account_addr) {
+        return balance;
+    }
 
-    // TODO: WTF this does not work?
-    querier.query(&QueryRequest::Wasm(WasmQuery::Raw {
-        contract_addr: contract.to_string(),
-        key: Binary::from(concat(&to_length_prefixed(b"balance"), account.as_bytes())),
+    if let Ok(balance) = query_token_balance_new(deps, contract_addr, account_addr) {
+        return balance;
+    }
+
+    Uint128::zero()
+}
+
+fn query_token_balance_new(
+    deps: Deps,
+    contract_addr: &Addr,
+    account_addr: &Addr,
+) -> StdResult<Uint128> {
+    // load balance form the cw20 token contract version 0.6+
+    deps.querier.query(&QueryRequest::Wasm(WasmQuery::Raw {
+        contract_addr: contract_addr.to_string(),
+        key: Binary::from(concat(
+            &to_length_prefixed(b"balance"),
+            account_addr.as_bytes(),
+        )),
     }))
 }
 
-fn query_supply(querier: &QuerierWrapper, contract: &Addr) -> StdResult<Uint128> {
+fn query_token_balance_legacy(
+    deps: Deps,
+    contract_addr: &Addr,
+    account_addr: &Addr,
+) -> StdResult<Uint128> {
+    // load balance form the cw20 token contract version 0.2.x
+    deps.querier.query(&QueryRequest::Wasm(WasmQuery::Raw {
+        contract_addr: contract_addr.to_string(),
+        key: Binary::from(concat(
+            &to_length_prefixed(b"balance"),
+            (deps.api.addr_canonicalize(account_addr.as_str())?).as_slice(),
+        )),
+    }))
+}
+
+pub fn query_supply(querier: &QuerierWrapper, contract_addr: &Addr) -> StdResult<Uint128> {
+    if let Ok(supply) = query_supply_legacy(querier, contract_addr) {
+        return Ok(supply);
+    }
+
+    query_supply_new(querier, contract_addr)
+}
+
+fn query_supply_new(querier: &QuerierWrapper, contract_addr: &Addr) -> StdResult<Uint128> {
     let token_info: TokenInfo = querier.query(&QueryRequest::Wasm(WasmQuery::Raw {
-        contract_addr: contract.to_string(),
+        contract_addr: contract_addr.to_string(),
         key: Binary::from(b"token_info"),
     }))?;
+
+    Ok(token_info.total_supply)
+}
+
+fn query_supply_legacy(querier: &QuerierWrapper, contract_addr: &Addr) -> StdResult<Uint128> {
+    let token_info: TokenInfo = querier.query(&QueryRequest::Wasm(WasmQuery::Raw {
+        contract_addr: contract_addr.to_string(),
+        key: Binary::from(to_length_prefixed(b"token_info")),
+    }))?;
+
     Ok(token_info.total_supply)
 }
 
@@ -296,12 +342,11 @@ fn psi_circulating_amount(
     psi_token: &Addr,
     psi_total_supply: Uint128,
 ) -> StdResult<Uint128> {
-    let excluded_psi_amount = excluded_psi(deps.storage).into_iter().try_fold(
-        Uint128::zero(),
-        |acc, addr| -> StdResult<_> {
-            Ok(acc + query_token_balance(&deps.querier, psi_token, &addr)?)
-        },
-    )?;
+    let excluded_psi_amount = excluded_psi(deps.storage)
+        .into_iter()
+        .try_fold(Uint128::zero(), |acc, addr| -> StdResult<_> {
+            Ok(acc + query_token_balance(deps, psi_token, &addr))
+        })?;
     Ok(psi_total_supply - excluded_psi_amount)
 }
 
@@ -555,7 +600,7 @@ fn get_pair_and_balances(
 
     let mut balances = vec![];
     for a in assets {
-        let asset_balance = query_asset_balance(&deps.querier, a, &pair_info.contract_addr)?;
+        let asset_balance = query_asset_balance(deps, &deps.querier, a, &pair_info.contract_addr)?;
         if asset_balance.is_zero() {
             return Err(ContractError::ZeroBalanceInPair {
                 token: a.to_string(),
@@ -569,12 +614,13 @@ fn get_pair_and_balances(
 }
 
 fn query_asset_balance(
+    deps: Deps,
     querier: &QuerierWrapper,
     asset: &AssetInfo,
     addr: &Addr,
 ) -> StdResult<Uint128> {
     Ok(match asset {
-        AssetInfo::Token { contract_addr } => query_token_balance(querier, contract_addr, addr)?,
+        AssetInfo::Token { contract_addr } => query_token_balance(deps, contract_addr, addr),
         AssetInfo::NativeToken { denom } => querier.query_balance(addr, denom)?.amount,
     })
 }
@@ -658,14 +704,14 @@ fn save_reply_context(
     let astro_token = get_astro_token(&deps.querier, &astro_generator)?;
 
     let mut astro_token_balance =
-        query_token_balance(&deps.querier, &astro_token, &env.contract.address)?;
+        query_token_balance(deps.as_ref(), &astro_token, &env.contract.address);
     if let Some(token) = token {
         if token == &astro_token {
             astro_token_balance -= token_amount.unwrap_or_default();
         }
     }
     let mut psi_token_balance =
-        query_token_balance(&deps.querier, &psi_token, &env.contract.address)?;
+        query_token_balance(deps.as_ref(), &psi_token, &env.contract.address);
     psi_token_balance -= asset_cost_in_psi;
 
     REPLY_CONTEXT.save(
@@ -717,9 +763,9 @@ fn execute_claim_rewards(
         last.id = CLAIM_REWARDS_REPLY_ID;
 
         let astro_token_balance =
-            query_token_balance(&deps.querier, &astro_token, &env.contract.address)?;
+            query_token_balance(deps.as_ref(), &astro_token, &env.contract.address);
         let psi_token_balance =
-            query_token_balance(&deps.querier, &config.psi_token, &env.contract.address)?;
+            query_token_balance(deps.as_ref(), &config.psi_token, &env.contract.address);
         REPLY_CONTEXT.save(
             deps.storage,
             &ReplyContext {
@@ -746,7 +792,7 @@ pub fn reply(deps: DepsMut, env: Env, _msg: Reply) -> Result<Response, ContractE
 
     let ctx = REPLY_CONTEXT.load(deps.storage)?;
     for (token_addr, token_name, prev_balance) in ctx.balances {
-        let cur_balance = query_token_balance(&deps.querier, &token_addr, &env.contract.address)?;
+        let cur_balance = query_token_balance(deps.as_ref(), &token_addr, &env.contract.address);
         let transfer_amount = cur_balance - prev_balance;
         if transfer_amount.is_zero() {
             continue;
