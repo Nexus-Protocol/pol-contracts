@@ -1,4 +1,5 @@
-use cosmwasm_std::StdError;
+use astroport::asset::AssetInfo;
+use cosmwasm_std::{StdError, Uint128};
 use cw0::PaymentError;
 use thiserror::Error;
 
@@ -10,21 +11,36 @@ pub enum ContractError {
     #[error("{0}")]
     Payment(#[from] PaymentError),
 
-    #[error("Unauthorized")]
+    #[error("invalid pair: {addr}, reason: {source}")]
+    InvalidPair { addr: String, source: StdError },
+
+    #[error("pair {}-{} not allowed", assets_info[0], assets_info[1])]
+    NotAllowedPair { assets_info: [AssetInfo; 2] },
+
+    #[error("address must be in lowercase, but {addr}")]
+    WrongCaseAddr { addr: String },
+
+    #[error("unauthorized")]
     Unauthorized {},
 
-    #[error("Psi-NativeToken pair doesn't exist")]
-    PsiNativeTokenPairNotFound {},
+    #[error("zero balance of {token} in pair {addr}")]
+    ZeroBalanceInPair { token: String, addr: String },
 
-    #[error("No pairs")]
-    NoPairs {},
+    #[error("bonds amount {value} exceeds limit {maximum}")]
+    BondsAmountTooLarge { value: Uint128, maximum: Uint128 },
 
-    #[error("Zero psi tokens in pair")]
-    ZeroPsiTokensInPair {},
+    #[error("bonds amount {value} is less than expected {minimum}")]
+    BondsAmountTooSmall { value: Uint128, minimum: Uint128 },
 
-    #[error("Zero native tokens in pair")]
-    ZeroNativeTokensInPair {},
+    #[error("astro generator does not exist")]
+    NoAstroGenerator {},
 
-    #[error("Lp token isn't supported yet")]
-    NotSupportedLpToken {},
+    #[error("payment too small")]
+    PaymentTooSmall {},
+}
+
+impl From<ContractError> for StdError {
+    fn from(e: ContractError) -> Self {
+        StdError::generic_err(e.to_string())
+    }
 }

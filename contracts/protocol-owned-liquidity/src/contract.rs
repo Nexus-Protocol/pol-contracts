@@ -1,26 +1,40 @@
+use astroport::asset::{Asset, AssetInfo, PairInfo};
+use astroport::factory::ConfigResponse as FactoryConfig;
+use astroport::generator::ConfigResponse as GeneratorConfig;
+use cosmwasm_bignumber::{Decimal256, Uint256};
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    Addr, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, QueryRequest, Response, StdError,
-    StdResult, Uint128, WasmMsg, WasmQuery,
+    coins, from_binary, to_binary, Addr, Api, Attribute, Binary, CosmosMsg, Decimal, Deps, DepsMut,
+    Env, MessageInfo, QuerierWrapper, QueryRequest, Reply, ReplyOn, Response, StdError, StdResult,
+    SubMsg, Uint128, WasmMsg, WasmQuery,
 };
-use cw0::PaymentError;
-use cw2::set_contract_version;
+use cosmwasm_storage::to_length_prefixed;
+use cw0::{must_pay, nonpayable, Expiration};
+use cw2::{get_contract_version, set_contract_version};
 use cw20::Cw20ReceiveMsg;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use cw20_base::state::TokenInfo;
+use services::pol::{
+    BuySimulationResponse, ConfigResponse, Cw20HookMsg, ExecuteMsg, GovernanceMsg, InstantiateMsg,
+    MigrateMsg, QueryMsg,
+};
 use services::vesting::VestingSchedule;
-use terraswap::asset::PairInfo;
-use terraswap::querier::query_balance;
+use terra_cosmwasm::TerraQuerier;
 
 use crate::error::ContractError;
-use crate::msg::{
-    ConfigResponse, Cw20HookMsg, ExecuteMsg, GovernanceMsg, InstantiateMsg, QueryMsg,
+use crate::state::{
+    excluded_psi, pair, pairs, remove_excluded_psi, remove_pair, save_excluded_psi, save_pair,
+    save_state, Config, GovernanceUpdateState, ReplyContext, CONFIG, GOVERNANCE_UPDATE,
+    REPLY_CONTEXT, STATE,
 };
-use crate::state::{Config, GovernanceUpdateState, CONFIG, GOVERNANCE_UPDATE};
 
 const CONTRACT_NAME: &str = "nexus.protocol:protocol-owned-liquidity";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+const UST: &str = "uusd";
+
+pub const BUY_REPLY_ID: u64 = 1;
+pub const CLAIM_REWARDS_REPLY_ID: u64 = 2;
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
@@ -29,46 +43,61 @@ pub fn instantiate(
     info: MessageInfo,
     msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
-    set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
+    nonpayable(&info)?;
 
-    if msg.pairs_addr.is_empty() {
-        return Err(ContractError::NoPairs {});
+    for pi in &get_pairs_info(deps.as_ref(), msg.pairs)? {
+        save_pair(deps.storage, pi)?;
     }
 
-    let pairs_info: Result<Vec<PairInfo>, _> = msg
-        .pairs_addr
-        .iter()
-        .map(|addr| {
-            deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-                contract_addr: addr.clone(),
-                msg: cosmwasm_std::to_binary(&terraswap::pair::QueryMsg::Pair {})?,
-            }))
-        })
-        .collect();
+    for addr in msg.excluded_psi {
+        save_excluded_psi(deps.storage, &addr_validate_to_lower(deps.api, &addr)?)?;
+    }
+
     let config = Config {
-        owner: info.sender.clone(),
-        governance_addr: deps.api.addr_validate(&msg.governance_addr)?,
-        pairs_info: pairs_info?,
-        psi_token_addr: deps.api.addr_validate(&msg.psi_token_addr)?,
-        vesting_addr: deps.api.addr_validate(&msg.vesting_addr)?,
+        owner: info.sender,
+        governance: addr_validate_to_lower(deps.api, &msg.governance)?,
+        psi_token: addr_validate_to_lower(deps.api, &msg.psi_token)?,
+        vesting: addr_validate_to_lower(deps.api, &msg.vesting)?,
+        vesting_period: msg.vesting_period,
+        bond_control_var: msg.bond_control_var,
+        max_bonds_amount: msg.max_bonds_amount,
+        community_pool: addr_validate_to_lower(deps.api, &msg.community_pool)?,
+        autostake_lp_tokens: msg.autostake_lp_tokens,
+        factory: addr_validate_to_lower(deps.api, &msg.factory)?,
     };
     CONFIG.save(deps.storage, &config)?;
 
-    Ok(Response::new()
-        .add_attribute("method", "instantiate")
-        .add_attribute("owner", info.sender)
-        .add_attribute("governance_addr", config.governance_addr)
-        .add_attribute(
-            "pair_and_lptoken_addr",
-            config
-                .pairs_info
-                .iter()
-                .map(|pi| format!("({}, {})", pi.contract_addr, pi.liquidity_token))
-                .collect::<Vec<_>>()
-                .join(","),
-        )
-        .add_attribute("psi_token_addr", config.psi_token_addr)
-        .add_attribute("vesting_addr", config.vesting_addr))
+    save_state(deps.storage, Uint128::zero())?;
+
+    set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
+
+    Ok(Response::new().add_attribute("action", "instantiate"))
+}
+
+fn addr_validate_to_lower(api: &dyn Api, addr: &str) -> Result<Addr, ContractError> {
+    check_lowercase_addr(addr)?;
+    Ok(api.addr_validate(addr)?)
+}
+
+fn check_lowercase_addr(addr: &str) -> Result<(), ContractError> {
+    if addr.to_lowercase() != addr {
+        return Err(ContractError::WrongCaseAddr {
+            addr: addr.to_owned(),
+        });
+    }
+    Ok(())
+}
+
+fn get_pairs_info(deps: Deps, addrs: Vec<String>) -> Result<Vec<PairInfo>, ContractError> {
+    addrs
+        .into_iter()
+        .map(|addr| {
+            check_lowercase_addr(&addr)?;
+            deps.querier
+                .query_wasm_smart(addr.clone(), &astroport::pair::QueryMsg::Pair {})
+                .map_err(|e| ContractError::InvalidPair { addr, source: e })
+        })
+        .collect()
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -80,127 +109,51 @@ pub fn execute(
 ) -> Result<Response, ContractError> {
     match msg {
         ExecuteMsg::Receive(msg) => receive_cw20(deps, env, info, msg),
-        ExecuteMsg::Buy {} => execute_buy(deps, env, info),
+        ExecuteMsg::Buy { min_amount } => execute_buy(deps, env, info, min_amount),
+        ExecuteMsg::ClaimRewards {} => execute_claim_rewards(deps, env, info),
+        ExecuteMsg::AcceptGovernance {} => execute_accept_governance(deps, env, info),
         ExecuteMsg::Governance { msg } => {
+            nonpayable(&info)?;
+
             let config = CONFIG.load(deps.storage)?;
-            if info.sender != config.governance_addr {
+
+            if info.sender != config.governance {
                 return Err(ContractError::Unauthorized {});
             }
+
             match msg {
                 GovernanceMsg::UpdateConfig {
-                    pairs_addr,
-                    psi_token_addr,
-                    vesting_addr,
-                } => update_config(deps, config, pairs_addr, psi_token_addr, vesting_addr),
-                GovernanceMsg::AddPairsToConfig { pairs_addr } => {
-                    add_pairs_to_config(deps, config, pairs_addr)
+                    psi_token,
+                    vesting,
+                    vesting_period,
+                    bond_control_var,
+                    max_bonds_amount,
+                    community_pool,
+                    autostake_lp_tokens,
+                    factory,
+                } => update_config(
+                    deps,
+                    config,
+                    psi_token,
+                    vesting,
+                    vesting_period,
+                    bond_control_var,
+                    max_bonds_amount,
+                    community_pool,
+                    autostake_lp_tokens,
+                    factory,
+                ),
+                GovernanceMsg::UpdatePairs { add, remove } => update_pairs(deps, add, remove),
+                GovernanceMsg::UpdateExcludedPsi { add, remove } => {
+                    update_excluded_psi(deps, add, remove)
                 }
                 GovernanceMsg::UpdateGovernanceContract {
                     addr,
-                    tx_duration_sec,
-                } => update_governance_addr(deps, env, addr, tx_duration_sec),
+                    approve_period,
+                } => update_governance_addr(deps, env, addr, approve_period),
             }
         }
-        ExecuteMsg::AcceptGovernance {} => execute_accept_governance(deps, env, info),
     }
-}
-
-fn add_pairs_to_config(
-    deps: DepsMut,
-    mut config: Config,
-    pairs_addr: Vec<String>,
-) -> Result<Response, ContractError> {
-    let pairs_info: Result<Vec<PairInfo>, _> = pairs_addr
-        .iter()
-        .map(|addr| {
-            deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-                contract_addr: addr.clone(),
-                msg: cosmwasm_std::to_binary(&terraswap::pair::QueryMsg::Pair {})?,
-            }))
-        })
-        .collect();
-    let mut pairs_info = pairs_info?;
-    config.pairs_info.append(&mut pairs_info);
-    CONFIG.save(deps.storage, &config)?;
-    Ok(Response::new()
-        .add_attribute("action", "add_pairs_to_config")
-        .add_attribute("pairs_count", pairs_info.len().to_string()))
-}
-
-fn execute_accept_governance(
-    deps: DepsMut,
-    env: Env,
-    info: MessageInfo,
-) -> Result<Response, ContractError> {
-    let gov_update = GOVERNANCE_UPDATE.load(deps.storage)?;
-    let cur_time = env.block.time.seconds();
-
-    if gov_update.wait_approve_until < cur_time {
-        return Err(StdError::generic_err("too late to accept governance owning").into());
-    }
-
-    if info.sender != gov_update.new_governance_addr {
-        return Err(ContractError::Unauthorized {});
-    }
-
-    let new_gov_addr = gov_update.new_governance_addr.to_string();
-
-    let mut config = CONFIG.load(deps.storage)?;
-    config.governance_addr = gov_update.new_governance_addr;
-    CONFIG.save(deps.storage, &config)?;
-    GOVERNANCE_UPDATE.remove(deps.storage);
-
-    Ok(Response::new()
-        .add_attribute("action", "change_governance_contract")
-        .add_attribute("new_addr", &new_gov_addr))
-}
-
-fn update_governance_addr(
-    deps: DepsMut,
-    env: Env,
-    addr: String,
-    tx_duration_sec: u64,
-) -> Result<Response, ContractError> {
-    let cur_time = env.block.time.seconds();
-    let gov_update = GovernanceUpdateState {
-        new_governance_addr: deps.api.addr_validate(&addr)?,
-        wait_approve_until: cur_time + tx_duration_sec,
-    };
-    GOVERNANCE_UPDATE.save(deps.storage, &gov_update)?;
-    Ok(Response::default())
-}
-
-fn update_config(
-    deps: DepsMut,
-    mut config: Config,
-    pairs_addr: Option<Vec<String>>,
-    psi_token_addr: Option<String>,
-    vesting_addr: Option<String>,
-) -> Result<Response, ContractError> {
-    if let Some(pairs_addr) = pairs_addr {
-        let pairs_info: Result<Vec<PairInfo>, _> = pairs_addr
-            .iter()
-            .map(|addr| {
-                deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-                    contract_addr: addr.clone(),
-                    msg: cosmwasm_std::to_binary(&terraswap::pair::QueryMsg::Pair {})?,
-                }))
-            })
-            .collect();
-        config.pairs_info = pairs_info?;
-    }
-
-    if let Some(psi_token_addr) = psi_token_addr {
-        config.psi_token_addr = deps.api.addr_validate(&psi_token_addr)?;
-    }
-
-    if let Some(vesting_addr) = vesting_addr {
-        config.vesting_addr = deps.api.addr_validate(&vesting_addr)?;
-    }
-
-    CONFIG.save(deps.storage, &config)?;
-
-    Ok(Response::default())
 }
 
 fn receive_cw20(
@@ -209,209 +162,865 @@ fn receive_cw20(
     info: MessageInfo,
     cw20_msg: Cw20ReceiveMsg,
 ) -> Result<Response, ContractError> {
-    let lp_token_addr = info.sender;
+    nonpayable(&info)?;
 
     let config = CONFIG.load(deps.storage)?;
+    let state = STATE.load(deps.storage)?;
 
-    if cw20_msg.amount.is_zero() {
-        return Err(ContractError::Payment(PaymentError::NoFunds {}));
-    }
+    let cw20_token = info.sender;
 
-    let pair_info = config
-        .pairs_info
-        .iter()
-        .find(|pi| pi.liquidity_token == lp_token_addr)
-        .ok_or(ContractError::NotSupportedLpToken {})?;
+    match from_binary(&cw20_msg.msg) {
+        Ok(Cw20HookMsg::Buy { min_amount }) => {
+            let (cw20_pair_info, psi_balance_of_cw20_pair, token_balance_of_cw20_pair) =
+                get_pair_and_balances(
+                    deps.as_ref(),
+                    &[asset(config.psi_token.clone()), asset(cw20_token.clone())],
+                )?;
 
-    match cosmwasm_std::from_binary(&cw20_msg.msg) {
-        Ok(Cw20HookMsg::Buy {}) => {
-            let psi_tokens_amount = utils::query_token_balance(
-                &deps.as_ref(),
-                &config.psi_token_addr,
-                &Addr::unchecked(pair_info.contract_addr.clone()),
-            )?;
-            if psi_tokens_amount.is_zero() {
-                return Err(ContractError::ZeroPsiTokensInPair {});
+            let asset_cost_in_psi =
+                cw20_msg.amount * psi_balance_of_cw20_pair / token_balance_of_cw20_pair;
+            if asset_cost_in_psi.is_zero() {
+                return Err(ContractError::PaymentTooSmall {});
             }
 
-            let lp_tokens_amount_total = utils::query_supply(&deps.querier, &lp_token_addr)?;
+            let (_, psi_balance_of_psi_ust_pair, ust_balance_of_psi_ust_pair) =
+                get_pair_and_balances(
+                    deps.as_ref(),
+                    &[
+                        asset(config.psi_token.clone()),
+                        native_asset(UST.to_owned()),
+                    ],
+                )?;
 
-            let lp_tokens_price_in_psi =
-                Uint128::new(2) * psi_tokens_amount * cw20_msg.amount / lp_tokens_amount_total;
+            let (psi_price, bond_price, bonds) = calculate_bonds(
+                deps.as_ref(),
+                asset_cost_in_psi,
+                &config.psi_token,
+                ust_balance_of_psi_ust_pair,
+                psi_balance_of_psi_ust_pair,
+                state.bonds_issued,
+                config.bond_control_var,
+                min_amount,
+                config.max_bonds_amount,
+            )?;
 
-            // TODO: setup schedule properly
-            let vesting_schedule = VestingSchedule {
-                start_time: env.block.time.seconds(),
-                end_time: env.block.time.plus_seconds(5 * 24 * 3600).seconds(),
-                cliff_end_time: env.block.time.plus_seconds(4 * 24 * 3600).seconds(),
-                amount: lp_tokens_price_in_psi,
-            };
+            save_state(deps.storage, state.bonds_issued + bonds)?;
+
+            save_reply_context(
+                deps,
+                &env,
+                &config.factory,
+                config.psi_token.clone(),
+                asset_cost_in_psi,
+                Some(&cw20_token),
+                Some(cw20_msg.amount),
+                vec![
+                    ("action", "buy").into(),
+                    ("asset", cw20_token.clone()).into(),
+                    ("psi_price", psi_price.to_string()).into(),
+                    ("bond_price", bond_price.to_string()).into(),
+                    ("bonds_issued", bonds).into(),
+                    (
+                        "pair_with_provided_liquidity",
+                        cw20_pair_info.contract_addr.clone(),
+                    )
+                        .into(),
+                    ("provided_liquidity_in_psi", asset_cost_in_psi).into(),
+                    ("provided_liquidity_in_asset", cw20_msg.amount).into(),
+                ],
+            )?;
 
             Ok(Response::new()
-                .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: config.vesting_addr.to_string(),
-                    msg: cosmwasm_std::to_binary(
-                        &services::vesting::ExecuteMsg::AddVestingSchedule {
-                            addr: cw20_msg.sender.clone(),
-                            schedule: vesting_schedule,
-                        },
-                    )?,
-                    funds: vec![],
-                }))
-                .add_attribute("action", "buy")
-                .add_attribute("lp_tokens_amount", cw20_msg.amount)
-                .add_attribute("lp_tokens_price", lp_tokens_price_in_psi))
+                .add_submessage(linear_vesting(
+                    &env,
+                    &config.vesting,
+                    config.vesting_period,
+                    bonds,
+                    cw20_msg.sender,
+                )?)
+                .add_submessages(increase_allowances_and_provide_liquidity(
+                    &env,
+                    &cw20_pair_info.contract_addr,
+                    &config.psi_token,
+                    asset(cw20_token),
+                    asset_cost_in_psi,
+                    cw20_msg.amount,
+                    config.autostake_lp_tokens,
+                )?))
         }
         Err(err) => Err(ContractError::Std(err)),
     }
 }
 
-pub fn execute_buy(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, ContractError> {
-    let config = CONFIG.load(deps.storage)?;
+fn asset(addr: Addr) -> AssetInfo {
+    AssetInfo::Token {
+        contract_addr: addr,
+    }
+}
 
-    let payment = cw0::one_coin(&info)?;
+fn native_asset(denom: String) -> AssetInfo {
+    AssetInfo::NativeToken { denom }
+}
 
-    let pair_info = config
-        .pairs_info
-        .iter()
-        .find(|pair| {
-            utils::is_suitable_pair(config.psi_token_addr.to_string(), &payment.denom, pair)
-        })
-        .ok_or(ContractError::PsiNativeTokenPairNotFound {})?;
+fn query_token_balance(
+    querier: &QuerierWrapper,
+    contract: &Addr,
+    account: &Addr,
+) -> StdResult<Uint128> {
+    // astroport::querier::query_token_balance(querier, contract.clone(), account.clone())
 
-    let lp_psi_tokens_amount = utils::query_token_balance(
-        &deps.as_ref(),
-        &config.psi_token_addr,
-        &Addr::unchecked(pair_info.contract_addr.clone()),
+    // TODO: WTF this does not work?
+    querier.query(&QueryRequest::Wasm(WasmQuery::Raw {
+        contract_addr: contract.to_string(),
+        key: Binary::from(concat(&to_length_prefixed(b"balance"), account.as_bytes())),
+    }))
+}
+
+fn query_supply(querier: &QuerierWrapper, contract: &Addr) -> StdResult<Uint128> {
+    let token_info: TokenInfo = querier.query(&QueryRequest::Wasm(WasmQuery::Raw {
+        contract_addr: contract.to_string(),
+        key: Binary::from(b"token_info"),
+    }))?;
+    Ok(token_info.total_supply)
+}
+
+#[inline]
+fn concat(namespace: &[u8], key: &[u8]) -> Vec<u8> {
+    let mut k = namespace.to_vec();
+    k.extend_from_slice(key);
+    k
+}
+
+fn psi_circulating_amount(
+    deps: Deps,
+    psi_token: &Addr,
+    psi_total_supply: Uint128,
+) -> StdResult<Uint128> {
+    let excluded_psi_amount = excluded_psi(deps.storage).into_iter().try_fold(
+        Uint128::zero(),
+        |acc, addr| -> StdResult<_> {
+            Ok(acc + query_token_balance(&deps.querier, psi_token, &addr)?)
+        },
     )?;
-    if lp_psi_tokens_amount.is_zero() {
-        return Err(ContractError::ZeroPsiTokensInPair {});
+    Ok(psi_total_supply - excluded_psi_amount)
+}
+
+fn decimal_division_in_256<A: Into<Decimal256>, B: Into<Decimal256>>(a: A, b: B) -> Decimal {
+    let a_u256: Decimal256 = a.into();
+    let b_u256: Decimal256 = b.into();
+    let c_u256: Decimal = (a_u256 / b_u256).into();
+    c_u256
+}
+
+fn decimal_multiplication_in_256<A: Into<Decimal256>, B: Into<Decimal256>>(a: A, b: B) -> Decimal {
+    let a_u256: Decimal256 = a.into();
+    let b_u256: Decimal256 = b.into();
+    let c_u256: Decimal = (b_u256 * a_u256).into();
+    c_u256
+}
+
+fn get_astro_generator(querier: &QuerierWrapper, factory: &Addr) -> StdResult<Option<Addr>> {
+    let factory_config: FactoryConfig =
+        querier.query_wasm_smart(factory, &astroport::factory::QueryMsg::Config {})?;
+    Ok(factory_config.generator_address)
+}
+
+fn get_astro_token(querier: &QuerierWrapper, astro_generator: &Addr) -> StdResult<Addr> {
+    let generator_config: GeneratorConfig =
+        querier.query_wasm_smart(astro_generator, &astroport::generator::QueryMsg::Config {})?;
+    Ok(generator_config.astro_token)
+}
+
+fn increase_allowance(
+    env: &Env,
+    token: &Addr,
+    spender: &Addr,
+    amount: Uint128,
+) -> StdResult<SubMsg> {
+    Ok(SubMsg::new(WasmMsg::Execute {
+        contract_addr: token.to_string(),
+        msg: to_binary(&cw20::Cw20ExecuteMsg::IncreaseAllowance {
+            spender: spender.to_string(),
+            amount,
+            expires: Some(Expiration::AtHeight(env.block.height + 1)),
+        })?,
+        funds: vec![],
+    }))
+}
+
+fn provide_liquidity(
+    pair: &Addr,
+    token: Addr,
+    token_amount: Uint128,
+    asset_info: AssetInfo,
+    asset_amount: Uint128,
+    auto_stake: bool,
+) -> StdResult<SubMsg> {
+    Ok(SubMsg::reply_on_success(
+        WasmMsg::Execute {
+            contract_addr: pair.to_string(),
+            msg: to_binary(&astroport::pair::ExecuteMsg::ProvideLiquidity {
+                assets: [
+                    Asset {
+                        info: asset(token),
+                        amount: token_amount,
+                    },
+                    Asset {
+                        info: asset_info.clone(),
+                        amount: asset_amount,
+                    },
+                ],
+                slippage_tolerance: None,
+                receiver: None,
+                auto_stake: Some(auto_stake),
+            })?,
+            funds: if let AssetInfo::NativeToken { denom } = asset_info {
+                coins(asset_amount.u128(), denom)
+            } else {
+                vec![]
+            },
+        },
+        BUY_REPLY_ID,
+    ))
+}
+
+fn increase_allowances_and_provide_liquidity(
+    env: &Env,
+    pair: &Addr,
+    token: &Addr,
+    asset_info: AssetInfo,
+    token_amount: Uint128,
+    asset_amount: Uint128,
+    auto_stake: bool,
+) -> StdResult<Vec<SubMsg>> {
+    let mut result = vec![increase_allowance(env, token, pair, token_amount)?];
+
+    if let AssetInfo::Token { ref contract_addr } = asset_info {
+        result.push(increase_allowance(env, contract_addr, pair, asset_amount)?);
     }
 
-    let lp_native_tokens_amount = query_balance(
-        &deps.querier,
-        Addr::unchecked(pair_info.contract_addr.clone()),
-        payment.denom.clone(),
-    )?;
-    if lp_native_tokens_amount.is_zero() {
-        return Err(ContractError::ZeroNativeTokensInPair {});
-    }
+    result.push(provide_liquidity(
+        pair,
+        token.clone(),
+        token_amount,
+        asset_info,
+        asset_amount,
+        auto_stake,
+    )?);
 
-    let psi_tokens_amount = payment.amount * lp_psi_tokens_amount / lp_native_tokens_amount;
+    Ok(result)
+}
 
-    // TODO: setup schedule properly
+fn linear_vesting(
+    env: &Env,
+    vesting: &Addr,
+    period: u64,
+    amount: Uint128,
+    recipient: String,
+) -> StdResult<SubMsg> {
+    let cur_time = env.block.time;
     let vesting_schedule = VestingSchedule {
-        start_time: env.block.time.seconds(),
-        end_time: env.block.time.plus_seconds(5 * 24 * 3600).seconds(),
-        cliff_end_time: env.block.time.plus_seconds(4 * 24 * 3600).seconds(),
-        amount: psi_tokens_amount,
+        start_time: cur_time.seconds(),
+        end_time: cur_time.plus_seconds(period).seconds(),
+        cliff_end_time: cur_time.seconds(),
+        amount,
     };
 
+    Ok(SubMsg::new(WasmMsg::Execute {
+        contract_addr: vesting.to_string(),
+        msg: to_binary(&services::vesting::ExecuteMsg::AddVestingSchedule {
+            addr: recipient,
+            schedule: vesting_schedule,
+        })?,
+        funds: vec![],
+    }))
+}
+
+fn ceiled_mul_uint_decimal(a: Uint256, b: Decimal256) -> Uint256 {
+    let decimal_output = Decimal256::from_uint256(a) * b;
+    let floored_output = Uint256::from(decimal_output.0 / Decimal256::DECIMAL_FRACTIONAL);
+
+    if decimal_output != Decimal256::from_uint256(floored_output) {
+        floored_output + Uint256::one()
+    } else {
+        floored_output
+    }
+}
+
+pub fn get_taxed(deps: Deps, amount: Uint256) -> StdResult<Uint256> {
+    let terra_querier = TerraQuerier::new(&deps.querier);
+    let rate = Decimal256::from((terra_querier.query_tax_rate()?).rate);
+    let cap = Uint256::from((terra_querier.query_tax_cap(UST)?).cap);
+
+    let tax = if amount.is_zero() {
+        Uint256::zero()
+    } else {
+        let rate_part = Decimal256::one() - Decimal256::one() / (Decimal256::one() + rate);
+        ceiled_mul_uint_decimal(amount, rate_part)
+    };
+
+    let tax_capped = std::cmp::min(tax, cap);
+    Ok(amount - std::cmp::max(tax_capped, Uint256::one()))
+}
+
+fn execute_buy(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    min_bonds_amount: Uint128,
+) -> Result<Response, ContractError> {
+    let payment_before_tax = must_pay(&info, UST)?;
+    let payment = Uint128::from(get_taxed(deps.as_ref(), payment_before_tax.into())?);
+
+    let config = CONFIG.load(deps.storage)?;
+    let state = STATE.load(deps.storage)?;
+
+    let (pair_info, psi_balance_of_pair, ust_balance_of_pair) = get_pair_and_balances(
+        deps.as_ref(),
+        &[
+            asset(config.psi_token.clone()),
+            native_asset(UST.to_owned()),
+        ],
+    )?;
+
+    let asset_cost_in_psi = payment * psi_balance_of_pair / ust_balance_of_pair;
+    if asset_cost_in_psi.is_zero() {
+        return Err(ContractError::PaymentTooSmall {});
+    }
+
+    let (psi_price, bond_price, bonds) = calculate_bonds(
+        deps.as_ref(),
+        asset_cost_in_psi,
+        &config.psi_token,
+        ust_balance_of_pair,
+        psi_balance_of_pair,
+        state.bonds_issued,
+        config.bond_control_var,
+        min_bonds_amount,
+        config.max_bonds_amount,
+    )?;
+
+    save_state(deps.storage, state.bonds_issued + bonds)?;
+
+    save_reply_context(
+        deps,
+        &env,
+        &config.factory,
+        config.psi_token.clone(),
+        asset_cost_in_psi,
+        None,
+        None,
+        vec![
+            ("action", "buy").into(),
+            ("asset", UST).into(),
+            ("psi_price", psi_price.to_string()).into(),
+            ("bond_price", bond_price.to_string()).into(),
+            ("bonds_issued", bonds).into(),
+            (
+                "pair_with_provided_liquidity",
+                pair_info.contract_addr.clone(),
+            )
+                .into(),
+            ("provided_liquidity_in_psi", asset_cost_in_psi).into(),
+            ("provided_liquidity_in_asset", payment).into(),
+        ],
+    )?;
+
     Ok(Response::new()
-        .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: config.vesting_addr.to_string(),
-            msg: cosmwasm_std::to_binary(&services::vesting::ExecuteMsg::AddVestingSchedule {
-                addr: info.sender.to_string(),
-                schedule: vesting_schedule,
+        .add_submessage(linear_vesting(
+            &env,
+            &config.vesting,
+            config.vesting_period,
+            bonds,
+            info.sender.to_string(),
+        )?)
+        .add_submessages(increase_allowances_and_provide_liquidity(
+            &env,
+            &pair_info.contract_addr,
+            &config.psi_token,
+            native_asset(UST.to_owned()),
+            asset_cost_in_psi,
+            payment,
+            config.autostake_lp_tokens,
+        )?))
+}
+
+fn get_pair_and_balances(
+    deps: Deps,
+    assets: &[AssetInfo; 2],
+) -> Result<(PairInfo, Uint128, Uint128), ContractError> {
+    let pair_info = pair(deps.storage, assets).map_err(|_e| ContractError::NotAllowedPair {
+        assets_info: assets.clone(),
+    })?;
+
+    let mut balances = vec![];
+    for a in assets {
+        let asset_balance = query_asset_balance(&deps.querier, a, &pair_info.contract_addr)?;
+        if asset_balance.is_zero() {
+            return Err(ContractError::ZeroBalanceInPair {
+                token: a.to_string(),
+                addr: pair_info.contract_addr.to_string(),
+            });
+        }
+        balances.push(asset_balance);
+    }
+
+    Ok((pair_info, balances[0], balances[1]))
+}
+
+fn query_asset_balance(
+    querier: &QuerierWrapper,
+    asset: &AssetInfo,
+    addr: &Addr,
+) -> StdResult<Uint128> {
+    Ok(match asset {
+        AssetInfo::Token { contract_addr } => query_token_balance(querier, contract_addr, addr)?,
+        AssetInfo::NativeToken { denom } => querier.query_balance(addr, denom)?.amount,
+    })
+}
+
+fn calculate_bonds_inner(
+    asset_cost_in_psi: Uint128,
+    bonds_issued: Uint128,
+    psi_price: Decimal,
+    psi_circulating_amount: Uint128,
+    psi_total_supply: Uint128,
+    bcv: Decimal,
+) -> (Decimal, Uint128) {
+    let psi_intrinsic_value =
+        Decimal::from_ratio(psi_circulating_amount * psi_price, psi_total_supply);
+    let debt_ratio = Decimal::from_ratio(bonds_issued, psi_total_supply);
+    let psi_premium = decimal_multiplication_in_256(debt_ratio, bcv);
+    let bond_price = psi_intrinsic_value + psi_premium;
+    (
+        bond_price,
+        decimal_division_in_256(
+            Decimal::from_ratio(asset_cost_in_psi * psi_price, Uint128::new(1)),
+            bond_price,
+        ) * Uint128::new(1),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn calculate_bonds(
+    deps: Deps,
+    asset_cost_in_psi: Uint128,
+    psi_token: &Addr,
+    ust_balance_of_pair: Uint128,
+    psi_balance_of_pair: Uint128,
+    bonds_issued: Uint128,
+    bcv: Decimal,
+    min_bonds_amount: Uint128,
+    max_bonds_amount: Decimal,
+) -> Result<(Decimal, Decimal, Uint128), ContractError> {
+    let psi_price = Decimal::from_ratio(ust_balance_of_pair, psi_balance_of_pair);
+    let psi_total_supply = query_supply(&deps.querier, psi_token)?;
+
+    let (bond_price, bonds) = calculate_bonds_inner(
+        asset_cost_in_psi,
+        bonds_issued,
+        psi_price,
+        psi_circulating_amount(deps, psi_token, psi_total_supply)?,
+        psi_total_supply,
+        bcv,
+    );
+    let max_amount = psi_total_supply * max_bonds_amount;
+    if bonds > max_amount {
+        return Err(ContractError::BondsAmountTooLarge {
+            value: bonds,
+            maximum: max_amount,
+        });
+    }
+    if bonds < min_bonds_amount {
+        return Err(ContractError::BondsAmountTooSmall {
+            value: bonds,
+            minimum: min_bonds_amount,
+        });
+    }
+    Ok((psi_price, bond_price, bonds))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn save_reply_context(
+    deps: DepsMut,
+    env: &Env,
+    factory: &Addr,
+    psi_token: Addr,
+    asset_cost_in_psi: Uint128,
+    token: Option<&Addr>,
+    token_amount: Option<Uint128>,
+    attributes: Vec<Attribute>,
+) -> Result<(), ContractError> {
+    let astro_generator = match get_astro_generator(&deps.querier, factory)? {
+        Some(addr) => addr,
+        None => return Err(ContractError::NoAstroGenerator {}),
+    };
+    let astro_token = get_astro_token(&deps.querier, &astro_generator)?;
+
+    let mut astro_token_balance =
+        query_token_balance(&deps.querier, &astro_token, &env.contract.address)?;
+    if let Some(token) = token {
+        if token == &astro_token {
+            astro_token_balance -= token_amount.unwrap_or_default();
+        }
+    }
+    let mut psi_token_balance =
+        query_token_balance(&deps.querier, &psi_token, &env.contract.address)?;
+    psi_token_balance -= asset_cost_in_psi;
+
+    REPLY_CONTEXT.save(
+        deps.storage,
+        &ReplyContext {
+            attributes,
+            balances: vec![
+                (astro_token, "astro".to_owned(), astro_token_balance),
+                (psi_token, "psi".to_owned(), psi_token_balance),
+            ],
+        },
+    )?;
+
+    Ok(())
+}
+
+fn execute_claim_rewards(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+) -> Result<Response, ContractError> {
+    nonpayable(&info)?;
+
+    let config = CONFIG.load(deps.storage)?;
+
+    let astro_generator = match get_astro_generator(&deps.querier, &config.factory)? {
+        Some(addr) => addr,
+        None => return Err(ContractError::NoAstroGenerator {}),
+    };
+    let astro_token = get_astro_token(&deps.querier, &astro_generator)?;
+
+    let messages: Result<Vec<SubMsg>, StdError> = pairs(deps.storage)
+        .into_iter()
+        .map(|pair| {
+            Ok(SubMsg::new(WasmMsg::Execute {
+                contract_addr: astro_generator.to_string(),
+                msg: to_binary(&astroport::generator::ExecuteMsg::Withdraw {
+                    lp_token: pair.liquidity_token,
+                    amount: Uint128::zero(),
+                })?,
+                funds: vec![],
+            }))
+        })
+        .collect();
+    let mut messages = messages?;
+
+    Ok(if let Some(last) = messages.last_mut() {
+        last.reply_on = ReplyOn::Success;
+        last.id = CLAIM_REWARDS_REPLY_ID;
+
+        let astro_token_balance =
+            query_token_balance(&deps.querier, &astro_token, &env.contract.address)?;
+        let psi_token_balance =
+            query_token_balance(&deps.querier, &config.psi_token, &env.contract.address)?;
+        REPLY_CONTEXT.save(
+            deps.storage,
+            &ReplyContext {
+                attributes: vec![("action", "claim_rewards").into()],
+                balances: vec![
+                    (astro_token, "astro".to_owned(), astro_token_balance),
+                    (config.psi_token, "psi".to_owned(), psi_token_balance),
+                ],
+            },
+        )?;
+
+        Response::new().add_submessages(messages)
+    } else {
+        Response::new().add_attribute("action", "claim_rewards")
+    })
+}
+
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn reply(deps: DepsMut, env: Env, _msg: Reply) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+
+    let mut messages = vec![];
+    let mut attributes = vec![];
+
+    let ctx = REPLY_CONTEXT.load(deps.storage)?;
+    for (token_addr, token_name, prev_balance) in ctx.balances {
+        let cur_balance = query_token_balance(&deps.querier, &token_addr, &env.contract.address)?;
+        let transfer_amount = cur_balance - prev_balance;
+        if transfer_amount.is_zero() {
+            continue;
+        }
+        messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: token_addr.to_string(),
+            msg: to_binary(&cw20::Cw20ExecuteMsg::Transfer {
+                recipient: config.community_pool.to_string(),
+                amount: transfer_amount,
             })?,
             funds: vec![],
-        }))
-        .add_attribute("action", "buy")
-        .add_attribute("native_token_denom", payment.denom)
-        .add_attribute("lp_psi_tokens_amount", lp_psi_tokens_amount)
-        .add_attribute("lp_native_token_amount", lp_native_tokens_amount)
-        .add_attribute("native_token_amount", payment.amount)
-        .add_attribute("psi_amount", psi_tokens_amount))
+        }));
+        attributes.push((format!("{}_tokens_claimed", token_name), transfer_amount));
+    }
+    REPLY_CONTEXT.remove(deps.storage);
+
+    Ok(Response::new()
+        .add_messages(messages)
+        .add_attributes(ctx.attributes)
+        .add_attributes(attributes))
+}
+
+fn execute_accept_governance(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+) -> Result<Response, ContractError> {
+    nonpayable(&info)?;
+
+    let gov_update = GOVERNANCE_UPDATE.load(deps.storage)?;
+    let cur_time = env.block.time.seconds();
+
+    if gov_update.wait_approve_until < cur_time {
+        return Err(StdError::generic_err("too late to accept governance owning").into());
+    }
+
+    if info.sender != gov_update.new_governance {
+        return Err(ContractError::Unauthorized {});
+    }
+
+    let new_gov_addr = gov_update.new_governance.to_string();
+
+    let mut config = CONFIG.load(deps.storage)?;
+    config.governance = gov_update.new_governance;
+    CONFIG.save(deps.storage, &config)?;
+    GOVERNANCE_UPDATE.remove(deps.storage);
+
+    Ok(Response::new()
+        .add_attribute("action", "change_governance_contract")
+        .add_attribute("new_addr", &new_gov_addr))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn update_config(
+    deps: DepsMut,
+    mut config: Config,
+    psi_token: Option<String>,
+    vesting: Option<String>,
+    vesting_period: Option<u64>,
+    bond_control_var: Option<Decimal>,
+    max_bonds_amount: Option<Decimal>,
+    community_pool: Option<String>,
+    autostake_lp_tokens: Option<bool>,
+    factory: Option<String>,
+) -> Result<Response, ContractError> {
+    if let Some(psi_token) = psi_token {
+        config.psi_token = addr_validate_to_lower(deps.api, &psi_token)?;
+    }
+
+    if let Some(vesting) = vesting {
+        config.vesting = addr_validate_to_lower(deps.api, &vesting)?;
+    }
+
+    if let Some(vesting_period) = vesting_period {
+        config.vesting_period = vesting_period;
+    }
+
+    if let Some(bond_control_var) = bond_control_var {
+        config.bond_control_var = bond_control_var;
+    }
+
+    if let Some(max_bonds_amount) = max_bonds_amount {
+        config.max_bonds_amount = max_bonds_amount;
+    }
+
+    if let Some(community_pool) = community_pool {
+        config.community_pool = addr_validate_to_lower(deps.api, &community_pool)?;
+    }
+
+    if let Some(autostake_lp_tokens) = autostake_lp_tokens {
+        config.autostake_lp_tokens = autostake_lp_tokens;
+    }
+
+    if let Some(factory) = factory {
+        config.factory = addr_validate_to_lower(deps.api, &factory)?;
+    }
+
+    CONFIG.save(deps.storage, &config)?;
+
+    Ok(Response::new().add_attribute("action", "update_config"))
+}
+
+fn update_pairs(
+    deps: DepsMut,
+    add: Vec<String>,
+    remove: Vec<String>,
+) -> Result<Response, ContractError> {
+    for pi in get_pairs_info(deps.as_ref(), add)? {
+        save_pair(deps.storage, &pi)?;
+    }
+
+    for pi in get_pairs_info(deps.as_ref(), remove)? {
+        remove_pair(deps.storage, &pi);
+    }
+
+    Ok(Response::new().add_attribute("action", "update_pairs"))
+}
+
+fn update_excluded_psi(
+    deps: DepsMut,
+    add: Vec<String>,
+    remove: Vec<String>,
+) -> Result<Response, ContractError> {
+    for addr in add {
+        save_excluded_psi(deps.storage, &addr_validate_to_lower(deps.api, &addr)?)?;
+    }
+
+    for addr in remove {
+        remove_excluded_psi(deps.storage, &addr_validate_to_lower(deps.api, &addr)?);
+    }
+
+    Ok(Response::new().add_attribute("action", "update_excluded_psi"))
+}
+
+fn update_governance_addr(
+    deps: DepsMut,
+    env: Env,
+    addr: String,
+    approve_period: u64,
+) -> Result<Response, ContractError> {
+    let cur_time = env.block.time.seconds();
+    let gov_update = GovernanceUpdateState {
+        new_governance: deps.api.addr_validate(&addr)?,
+        wait_approve_until: cur_time + approve_period,
+    };
+    GOVERNANCE_UPDATE.save(deps.storage, &gov_update)?;
+    Ok(Response::new())
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::Config {} => cosmwasm_std::to_binary(&query_config(deps)?),
+        QueryMsg::Config {} => to_binary(&query_config(deps)?),
+        QueryMsg::BuySimulation { asset } => to_binary(&query_buy_simulation(deps, asset)?),
     }
 }
 
 fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     let config = CONFIG.load(deps.storage)?;
+
+    let pairs = pairs(deps.storage)
+        .into_iter()
+        .map(|pi| pi.contract_addr.to_string())
+        .collect();
+    let excluded_psi = excluded_psi(deps.storage)
+        .into_iter()
+        .map(|addr| addr.to_string())
+        .collect();
+
     Ok(ConfigResponse {
         owner: config.owner.to_string(),
-        governance_addr: config.governance_addr.to_string(),
-        pairs_info: config
-            .pairs_info
-            .iter()
-            .map(|pi| format!("({}, {})", pi.contract_addr, pi.liquidity_token))
-            .collect::<Vec<_>>()
-            .join(","),
-        psi_token_addr: config.psi_token_addr.to_string(),
-        vesting_addr: config.vesting_addr.to_string(),
+        governance: config.governance.to_string(),
+        psi_token: config.psi_token.to_string(),
+        vesting: config.vesting.to_string(),
+        vesting_period: config.vesting_period,
+        bond_control_var: config.bond_control_var,
+        max_bonds_amount: config.max_bonds_amount,
+        excluded_psi,
+        pairs,
+        community_pool: config.community_pool.to_string(),
+        autostake_lp_tokens: config.autostake_lp_tokens,
+        factory: config.factory.to_string(),
     })
 }
 
-mod utils {
-    use cosmwasm_std::{
-        Addr, Binary, Deps, QuerierWrapper, QueryRequest, StdResult, Uint128, WasmQuery,
-    };
-    use cosmwasm_storage::to_length_prefixed;
-    use cw20_base::state::TokenInfo;
-    use terraswap::asset::{AssetInfo, PairInfo};
+fn query_buy_simulation(deps: Deps, buy_asset: Asset) -> StdResult<BuySimulationResponse> {
+    let config = CONFIG.load(deps.storage)?;
+    let state = STATE.load(deps.storage)?;
 
-    pub fn query_supply(querier: &QuerierWrapper, contract_addr: &Addr) -> StdResult<Uint128> {
-        let token_info: TokenInfo = querier.query(&QueryRequest::Wasm(WasmQuery::Raw {
-            contract_addr: contract_addr.to_string(),
-            key: Binary::from(b"token_info"),
-        }))?;
-
-        Ok(token_info.total_supply)
+    let payment = buy_asset.amount;
+    if payment.is_zero() {
+        return Err(StdError::generic_err("no funds"));
     }
 
-    pub fn query_token_balance(
-        deps: &Deps,
-        contract_addr: &Addr,
-        account_addr: &Addr,
-    ) -> StdResult<Uint128> {
-        deps.querier.query(&QueryRequest::Wasm(WasmQuery::Raw {
-            contract_addr: contract_addr.to_string(),
-            key: Binary::from(concat(
-                &to_length_prefixed(b"balance"),
-                account_addr.as_bytes(),
-            )),
-        }))
-    }
-
-    #[inline]
-    fn concat(namespace: &[u8], key: &[u8]) -> Vec<u8> {
-        let mut k = namespace.to_vec();
-        k.extend_from_slice(key);
-        k
-    }
-
-    pub fn is_suitable_pair(
-        psi_token_addr: String,
-        native_token_denom: &str,
-        pair_info: &PairInfo,
-    ) -> bool {
-        let (mut is_psi, mut is_native) = (false, false);
-
-        for ai in &pair_info.asset_infos {
-            match ai {
-                AssetInfo::Token { contract_addr } if contract_addr == &psi_token_addr => {
-                    is_psi = true
-                }
-                AssetInfo::NativeToken { denom } if denom == native_token_denom => is_native = true,
-                _ => {}
+    let (psi_price, bond_price, bonds) = match buy_asset.info {
+        AssetInfo::NativeToken { denom } => {
+            if denom != UST {
+                return Err(StdError::generic_err(format!(
+                    "invalid denom: only {} allowed",
+                    UST
+                )));
             }
+
+            let payment = Uint128::from(get_taxed(deps, payment.into())?);
+
+            let (_, psi_balance_of_pair, ust_balance_of_pair) = get_pair_and_balances(
+                deps,
+                &[
+                    asset(config.psi_token.clone()),
+                    native_asset(UST.to_owned()),
+                ],
+            )?;
+
+            let asset_cost_in_psi = payment * psi_balance_of_pair / ust_balance_of_pair;
+            if asset_cost_in_psi.is_zero() {
+                return Err(ContractError::PaymentTooSmall {}.into());
+            }
+
+            calculate_bonds(
+                deps,
+                asset_cost_in_psi,
+                &config.psi_token,
+                ust_balance_of_pair,
+                psi_balance_of_pair,
+                state.bonds_issued,
+                config.bond_control_var,
+                Uint128::zero(),
+                Decimal::one(),
+            )
         }
+        AssetInfo::Token { contract_addr } => {
+            let (_, psi_balance_of_cw20_pair, token_balance_of_cw20_pair) = get_pair_and_balances(
+                deps,
+                &[asset(config.psi_token.clone()), asset(contract_addr)],
+            )?;
 
-        is_psi && is_native
-    }
+            let asset_cost_in_psi = payment * psi_balance_of_cw20_pair / token_balance_of_cw20_pair;
+            if asset_cost_in_psi.is_zero() {
+                return Err(ContractError::PaymentTooSmall {}.into());
+            }
+
+            let (_, psi_balance_of_psi_ust_pair, ust_balance_of_psi_ust_pair) =
+                get_pair_and_balances(
+                    deps,
+                    &[
+                        asset(config.psi_token.clone()),
+                        native_asset(UST.to_owned()),
+                    ],
+                )?;
+
+            calculate_bonds(
+                deps,
+                asset_cost_in_psi,
+                &config.psi_token,
+                ust_balance_of_psi_ust_pair,
+                psi_balance_of_psi_ust_pair,
+                state.bonds_issued,
+                config.bond_control_var,
+                Uint128::zero(),
+                Decimal::one(),
+            )
+        }
+    }?;
+
+    Ok(BuySimulationResponse {
+        bonds,
+        bond_price,
+        psi_price,
+    })
 }
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct MigrateMsg {}
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn migrate(deps: DepsMut, _env: Env, _msg: MigrateMsg) -> Result<Response, ContractError> {
-    let ver = cw2::get_contract_version(deps.storage)?;
+    let ver = get_contract_version(deps.storage)?;
 
     if ver.contract != CONTRACT_NAME {
         return Err(StdError::generic_err("Can only upgrade from same type").into());
@@ -421,7 +1030,7 @@ pub fn migrate(deps: DepsMut, _env: Env, _msg: MigrateMsg) -> Result<Response, C
         return Err(StdError::generic_err("Cannot upgrade from a newer version").into());
     }
 
-    cw2::set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
+    set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
 
-    Ok(Response::default())
+    Ok(Response::new())
 }
