@@ -13,8 +13,7 @@ pub const PSI_TOKEN: &str = "psi_token";
 pub const CW20_TOKEN: &str = "token";
 pub const VESTING: &str = "vesting";
 pub const COMMUNITY_POOL: &str = "community_pool";
-pub const FACTORY: &str = "factory";
-pub const GENERATOR: &str = "generator";
+pub const ASTRO_GENERATOR: &str = "astro_generator";
 pub const ASTRO_TOKEN: &str = "astro_token";
 
 pub const CREATOR: &str = "creator";
@@ -119,7 +118,8 @@ pub fn instantiate_with_pairs(deps: &mut Deps, env: Env, pairs_info: Vec<PairInf
             max_bonds_amount: max_bonds_amount(),
             community_pool: COMMUNITY_POOL.to_owned(),
             autostake_lp_tokens: true,
-            factory: FACTORY.to_owned(),
+            astro_generator: ASTRO_GENERATOR.to_owned(),
+            astro_token: ASTRO_TOKEN.to_owned(),
         },
     )
     .unwrap();

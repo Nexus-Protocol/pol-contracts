@@ -1,9 +1,7 @@
 use astroport::asset::{Asset, AssetInfo};
-use astroport::factory::ConfigResponse as FactoryConfig;
-use astroport::generator::ConfigResponse as GeneratorConfig;
 use cosmwasm_std::{
     coin, coins, from_binary, Addr, ContractResult, CosmosMsg, Decimal, Reply, Response, StdError,
-    SubMsg, SubMsgExecutionResponse, Uint128, Uint64, WasmMsg,
+    SubMsg, SubMsgExecutionResponse, Uint128, WasmMsg,
 };
 use cosmwasm_std::{testing, to_binary};
 use cw0::{Expiration, PaymentError};
@@ -51,7 +49,8 @@ fn proper_instantiation() {
             max_bonds_amount: max_bonds_amount(),
             community_pool: COMMUNITY_POOL.to_owned(),
             autostake_lp_tokens: true,
-            factory: FACTORY.to_owned(),
+            astro_generator: ASTRO_GENERATOR.to_owned(),
+            astro_token: ASTRO_TOKEN.to_owned(),
         },
     );
 
@@ -71,7 +70,8 @@ fn proper_instantiation() {
             max_bonds_amount: max_bonds_amount(),
             community_pool: Addr::unchecked(COMMUNITY_POOL),
             autostake_lp_tokens: true,
-            factory: Addr::unchecked(FACTORY),
+            astro_generator: Addr::unchecked(ASTRO_GENERATOR),
+            astro_token: Addr::unchecked(ASTRO_TOKEN),
         },
         config
     );
@@ -107,7 +107,8 @@ fn instantiation_fails_when_wrong_case_address() {
             max_bonds_amount: max_bonds_amount(),
             community_pool: COMMUNITY_POOL.to_owned(),
             autostake_lp_tokens: true,
-            factory: FACTORY.to_owned(),
+            astro_generator: ASTRO_GENERATOR.to_owned(),
+            astro_token: ASTRO_TOKEN.to_owned(),
         },
     );
 
@@ -467,30 +468,6 @@ fn buy_with_cw20_tokens() {
             &[(env.contract.address.as_str(), &Uint128::zero())],
         ),
     ]);
-    deps.querier.wasm_query_smart_responses.insert(
-        FACTORY.to_owned(),
-        to_binary(&FactoryConfig {
-            owner: Addr::unchecked("abcd"),
-            pair_configs: vec![],
-            token_code_id: 1,
-            fee_address: None,
-            generator_address: Some(Addr::unchecked(GENERATOR)),
-        })
-        .unwrap(),
-    );
-    deps.querier.wasm_query_smart_responses.insert(
-        GENERATOR.to_owned(),
-        to_binary(&GeneratorConfig {
-            owner: Addr::unchecked("abcd"),
-            astro_token: Addr::unchecked(ASTRO_TOKEN),
-            tokens_per_block: Uint128::new(1),
-            total_alloc_point: Uint64::zero(),
-            start_block: Uint64::new(1),
-            allowed_reward_proxies: vec![],
-            vesting_contract: Addr::unchecked("abcd"),
-        })
-        .unwrap(),
-    );
     instantiate_with_pairs(
         &mut deps,
         env.clone(),
@@ -995,30 +972,6 @@ fn buy_with_coins() {
             &[(env.contract.address.as_str(), &Uint128::zero())],
         ),
     ]);
-    deps.querier.wasm_query_smart_responses.insert(
-        FACTORY.to_owned(),
-        to_binary(&FactoryConfig {
-            owner: Addr::unchecked("abcd"),
-            pair_configs: vec![],
-            token_code_id: 1,
-            fee_address: None,
-            generator_address: Some(Addr::unchecked(GENERATOR)),
-        })
-        .unwrap(),
-    );
-    deps.querier.wasm_query_smart_responses.insert(
-        GENERATOR.to_owned(),
-        to_binary(&GeneratorConfig {
-            owner: Addr::unchecked("abcd"),
-            astro_token: Addr::unchecked(ASTRO_TOKEN),
-            tokens_per_block: Uint128::new(1),
-            total_alloc_point: Uint64::zero(),
-            start_block: Uint64::new(1),
-            allowed_reward_proxies: vec![],
-            vesting_contract: Addr::unchecked("abcd"),
-        })
-        .unwrap(),
-    );
     instantiate_with_pairs(&mut deps, env.clone(), vec![pair.clone()]);
     STATE
         .save(
@@ -1215,30 +1168,6 @@ fn claim_rewards() {
             )],
         ),
     ]);
-    deps.querier.wasm_query_smart_responses.insert(
-        FACTORY.to_owned(),
-        to_binary(&FactoryConfig {
-            owner: Addr::unchecked("abcd"),
-            pair_configs: vec![],
-            token_code_id: 1,
-            fee_address: None,
-            generator_address: Some(Addr::unchecked(GENERATOR)),
-        })
-        .unwrap(),
-    );
-    deps.querier.wasm_query_smart_responses.insert(
-        GENERATOR.to_owned(),
-        to_binary(&GeneratorConfig {
-            owner: Addr::unchecked("abcd"),
-            astro_token: Addr::unchecked(ASTRO_TOKEN),
-            tokens_per_block: Uint128::new(1),
-            total_alloc_point: Uint64::zero(),
-            start_block: Uint64::new(1),
-            allowed_reward_proxies: vec![],
-            vesting_contract: Addr::unchecked("abcd"),
-        })
-        .unwrap(),
-    );
     instantiate_with_pairs(
         &mut deps,
         env.clone(),
@@ -1255,7 +1184,7 @@ fn claim_rewards() {
     assert_eq!(
         Ok(Response::new()
             .add_submessage(SubMsg::new(WasmMsg::Execute {
-                contract_addr: GENERATOR.to_owned(),
+                contract_addr: ASTRO_GENERATOR.to_owned(),
                 msg: to_binary(&astroport::generator::ExecuteMsg::Withdraw {
                     lp_token: cw_pair.liquidity_token,
                     amount: Uint128::zero(),
@@ -1265,7 +1194,7 @@ fn claim_rewards() {
             }))
             .add_submessage(SubMsg::reply_on_success(
                 WasmMsg::Execute {
-                    contract_addr: GENERATOR.to_owned(),
+                    contract_addr: ASTRO_GENERATOR.to_owned(),
                     msg: to_binary(&astroport::generator::ExecuteMsg::Withdraw {
                         lp_token: ust_pair.liquidity_token,
                         amount: Uint128::zero(),
@@ -1351,7 +1280,8 @@ fn do_not_accept_any_governance_msg_from_non_governance_contract() {
                 max_bonds_amount: None,
                 community_pool: None,
                 autostake_lp_tokens: None,
-                factory: None,
+                astro_generator: None,
+                astro_token: None,
             },
         },
     );
@@ -1421,7 +1351,8 @@ fn update_config() {
                 max_bonds_amount: Some(Decimal::from_str("0.1").unwrap()),
                 community_pool: Some("new_community_pool".to_owned()),
                 autostake_lp_tokens: Some(false),
-                factory: Some("new_factory".to_owned()),
+                astro_generator: Some("new_astro_generator".to_owned()),
+                astro_token: Some("new_astro_token".to_owned()),
             },
         },
     );
@@ -1442,7 +1373,8 @@ fn update_config() {
             max_bonds_amount: Decimal::from_str("0.1").unwrap(),
             community_pool: Addr::unchecked("new_community_pool"),
             autostake_lp_tokens: false,
-            factory: Addr::unchecked("new_factory"),
+            astro_generator: Addr::unchecked("new_astro_generator"),
+            astro_token: Addr::unchecked("new_astro_token"),
         },
         new_config
     );
@@ -1620,7 +1552,8 @@ fn query_config() {
             ],
             community_pool: COMMUNITY_POOL.to_string(),
             autostake_lp_tokens: true,
-            factory: FACTORY.to_string(),
+            astro_generator: ASTRO_GENERATOR.to_string(),
+            astro_token: ASTRO_TOKEN.to_string(),
         }),
         resp,
     );

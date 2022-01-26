@@ -1,6 +1,4 @@
 use astroport::asset::{Asset, AssetInfo, PairInfo};
-use astroport::factory::ConfigResponse as FactoryConfig;
-use astroport::generator::ConfigResponse as GeneratorConfig;
 use cosmwasm_bignumber::{Decimal256, Uint256};
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
@@ -63,7 +61,8 @@ pub fn instantiate(
         max_bonds_amount: msg.max_bonds_amount,
         community_pool: addr_validate_to_lower(deps.api, &msg.community_pool)?,
         autostake_lp_tokens: msg.autostake_lp_tokens,
-        factory: addr_validate_to_lower(deps.api, &msg.factory)?,
+        astro_generator: addr_validate_to_lower(deps.api, &msg.astro_generator)?,
+        astro_token: addr_validate_to_lower(deps.api, &msg.astro_token)?,
     };
     CONFIG.save(deps.storage, &config)?;
 
@@ -92,7 +91,7 @@ fn get_pairs_info(deps: Deps, addrs: Vec<String>) -> Result<Vec<PairInfo>, Contr
     addrs
         .into_iter()
         .map(|addr| {
-            check_lowercase_addr(&addr)?;
+            addr_validate_to_lower(deps.api, &addr)?;
             deps.querier
                 .query_wasm_smart(addr.clone(), &astroport::pair::QueryMsg::Pair {})
                 .map_err(|e| ContractError::InvalidPair { addr, source: e })
@@ -130,7 +129,8 @@ pub fn execute(
                     max_bonds_amount,
                     community_pool,
                     autostake_lp_tokens,
-                    factory,
+                    astro_generator,
+                    astro_token,
                 } => update_config(
                     deps,
                     config,
@@ -141,7 +141,8 @@ pub fn execute(
                     max_bonds_amount,
                     community_pool,
                     autostake_lp_tokens,
-                    factory,
+                    astro_generator,
+                    astro_token,
                 ),
                 GovernanceMsg::UpdatePairs { add, remove } => update_pairs(deps, add, remove),
                 GovernanceMsg::UpdateExcludedPsi { add, remove } => {
@@ -209,7 +210,7 @@ fn receive_cw20(
             save_reply_context(
                 deps,
                 &env,
-                &config.factory,
+                config.astro_token,
                 config.psi_token.clone(),
                 asset_cost_in_psi,
                 Some(&cw20_token),
@@ -362,18 +363,6 @@ fn decimal_multiplication_in_256<A: Into<Decimal256>, B: Into<Decimal256>>(a: A,
     let b_u256: Decimal256 = b.into();
     let c_u256: Decimal = (b_u256 * a_u256).into();
     c_u256
-}
-
-fn get_astro_generator(querier: &QuerierWrapper, factory: &Addr) -> StdResult<Option<Addr>> {
-    let factory_config: FactoryConfig =
-        querier.query_wasm_smart(factory, &astroport::factory::QueryMsg::Config {})?;
-    Ok(factory_config.generator_address)
-}
-
-fn get_astro_token(querier: &QuerierWrapper, astro_generator: &Addr) -> StdResult<Addr> {
-    let generator_config: GeneratorConfig =
-        querier.query_wasm_smart(astro_generator, &astroport::generator::QueryMsg::Config {})?;
-    Ok(generator_config.astro_token)
 }
 
 fn increase_allowance(
@@ -550,7 +539,7 @@ fn execute_buy(
     save_reply_context(
         deps,
         &env,
-        &config.factory,
+        config.astro_token,
         config.psi_token.clone(),
         asset_cost_in_psi,
         None,
@@ -691,19 +680,13 @@ fn calculate_bonds(
 fn save_reply_context(
     deps: DepsMut,
     env: &Env,
-    factory: &Addr,
+    astro_token: Addr,
     psi_token: Addr,
     asset_cost_in_psi: Uint128,
     token: Option<&Addr>,
     token_amount: Option<Uint128>,
     attributes: Vec<Attribute>,
 ) -> Result<(), ContractError> {
-    let astro_generator = match get_astro_generator(&deps.querier, factory)? {
-        Some(addr) => addr,
-        None => return Err(ContractError::NoAstroGenerator {}),
-    };
-    let astro_token = get_astro_token(&deps.querier, &astro_generator)?;
-
     let mut astro_token_balance =
         query_token_balance(deps.as_ref(), &astro_token, &env.contract.address);
     if let Some(token) = token {
@@ -738,17 +721,11 @@ fn execute_claim_rewards(
 
     let config = CONFIG.load(deps.storage)?;
 
-    let astro_generator = match get_astro_generator(&deps.querier, &config.factory)? {
-        Some(addr) => addr,
-        None => return Err(ContractError::NoAstroGenerator {}),
-    };
-    let astro_token = get_astro_token(&deps.querier, &astro_generator)?;
-
     let messages: Result<Vec<SubMsg>, StdError> = pairs(deps.storage)
         .into_iter()
         .map(|pair| {
             Ok(SubMsg::new(WasmMsg::Execute {
-                contract_addr: astro_generator.to_string(),
+                contract_addr: config.astro_generator.to_string(),
                 msg: to_binary(&astroport::generator::ExecuteMsg::Withdraw {
                     lp_token: pair.liquidity_token,
                     amount: Uint128::zero(),
@@ -764,7 +741,7 @@ fn execute_claim_rewards(
         last.id = CLAIM_REWARDS_REPLY_ID;
 
         let astro_token_balance =
-            query_token_balance(deps.as_ref(), &astro_token, &env.contract.address);
+            query_token_balance(deps.as_ref(), &config.astro_token, &env.contract.address);
         let psi_token_balance =
             query_token_balance(deps.as_ref(), &config.psi_token, &env.contract.address);
         REPLY_CONTEXT.save(
@@ -772,7 +749,7 @@ fn execute_claim_rewards(
             &ReplyContext {
                 attributes: vec![("action", "claim_rewards").into()],
                 balances: vec![
-                    (astro_token, "astro".to_owned(), astro_token_balance),
+                    (config.astro_token, "astro".to_owned(), astro_token_balance),
                     (config.psi_token, "psi".to_owned(), psi_token_balance),
                 ],
             },
@@ -857,7 +834,8 @@ fn update_config(
     max_bonds_amount: Option<Decimal>,
     community_pool: Option<String>,
     autostake_lp_tokens: Option<bool>,
-    factory: Option<String>,
+    astro_generator: Option<String>,
+    astro_token: Option<String>,
 ) -> Result<Response, ContractError> {
     if let Some(psi_token) = psi_token {
         config.psi_token = addr_validate_to_lower(deps.api, &psi_token)?;
@@ -887,8 +865,12 @@ fn update_config(
         config.autostake_lp_tokens = autostake_lp_tokens;
     }
 
-    if let Some(factory) = factory {
-        config.factory = addr_validate_to_lower(deps.api, &factory)?;
+    if let Some(astro_generator) = astro_generator {
+        config.astro_generator = addr_validate_to_lower(deps.api, &astro_generator)?;
+    }
+
+    if let Some(astro_token) = astro_token {
+        config.astro_token = addr_validate_to_lower(deps.api, &astro_token)?;
     }
 
     CONFIG.save(deps.storage, &config)?;
@@ -975,7 +957,8 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
         pairs,
         community_pool: config.community_pool.to_string(),
         autostake_lp_tokens: config.autostake_lp_tokens,
-        factory: config.factory.to_string(),
+        astro_generator: config.astro_generator.to_string(),
+        astro_token: config.astro_token.to_string(),
     })
 }
 

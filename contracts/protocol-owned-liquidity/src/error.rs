@@ -32,9 +32,6 @@ pub enum ContractError {
     #[error("bonds amount {value} is less than expected {minimum}")]
     BondsAmountTooSmall { value: Uint128, minimum: Uint128 },
 
-    #[error("astro generator does not exist")]
-    NoAstroGenerator {},
-
     #[error("payment too small")]
     PaymentTooSmall {},
 }

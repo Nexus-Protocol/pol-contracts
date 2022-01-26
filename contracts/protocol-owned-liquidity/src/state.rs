@@ -26,8 +26,8 @@ pub struct Config {
     // ASTRO & PSI rewards are transfered to.
     pub community_pool: Addr,
 
-    // Factory is used for creating all pairs.
-    pub factory: Addr,
+    pub astro_generator: Addr,
+    pub astro_token: Addr,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

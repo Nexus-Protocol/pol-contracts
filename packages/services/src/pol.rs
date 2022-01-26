@@ -28,8 +28,8 @@ pub struct InstantiateMsg {
     // Whether to stake LP tokens to Astroport or not.
     pub autostake_lp_tokens: bool,
 
-    // Factory is used for creating all pairs.
-    pub factory: String,
+    pub astro_generator: String,
+    pub astro_token: String,
 
     // Pairs are allowed to provide liquidity in.
     pub pairs: Vec<String>,
@@ -63,7 +63,8 @@ pub enum GovernanceMsg {
         max_bonds_amount: Option<Decimal>,
         community_pool: Option<String>,
         autostake_lp_tokens: Option<bool>,
-        factory: Option<String>,
+        astro_generator: Option<String>,
+        astro_token: Option<String>,
     },
     UpdatePairs {
         add: Vec<String>,
@@ -105,7 +106,8 @@ pub struct ConfigResponse {
     pub pairs: Vec<String>,
     pub community_pool: String,
     pub autostake_lp_tokens: bool,
-    pub factory: String,
+    pub astro_generator: String,
+    pub astro_token: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
