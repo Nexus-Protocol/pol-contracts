@@ -185,6 +185,12 @@ fn receive_cw20(
             if asset_cost_in_psi.is_zero() {
                 return Err(ContractError::PaymentTooSmall {});
             }
+            let psi_token_balance = get_and_check_psi_balance(
+                deps.as_ref(),
+                &config.psi_token,
+                &env.contract.address,
+                asset_cost_in_psi,
+            )?;
 
             let PairWithBalances {
                 pair_info: _,
@@ -220,6 +226,7 @@ fn receive_cw20(
                 &env,
                 config.astro_token,
                 config.psi_token.clone(),
+                psi_token_balance,
                 asset_cost_in_psi,
                 Some(&cw20_token),
                 Some(cw20_msg.amount),
@@ -532,6 +539,12 @@ fn execute_buy(
     if asset_cost_in_psi.is_zero() {
         return Err(ContractError::PaymentTooSmall {});
     }
+    let psi_token_balance = get_and_check_psi_balance(
+        deps.as_ref(),
+        &config.psi_token,
+        &env.contract.address,
+        asset_cost_in_psi,
+    )?;
 
     let BondsCalculationResult {
         psi_price,
@@ -556,6 +569,7 @@ fn execute_buy(
         &env,
         config.astro_token,
         config.psi_token.clone(),
+        psi_token_balance,
         asset_cost_in_psi,
         None,
         None,
@@ -709,12 +723,29 @@ fn calculate_bonds(
     })
 }
 
+fn get_and_check_psi_balance(
+    deps: Deps,
+    psi_token: &Addr,
+    addr: &Addr,
+    amount_required: Uint128,
+) -> Result<Uint128, ContractError> {
+    let psi_token_balance = query_token_balance(deps, psi_token, addr);
+    if psi_token_balance < amount_required {
+        return Err(ContractError::NotEnoughPsiTokens {
+            value: psi_token_balance,
+            required: amount_required,
+        });
+    }
+    Ok(psi_token_balance)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn save_reply_context(
     deps: DepsMut,
     env: &Env,
     astro_token: Addr,
     psi_token: Addr,
+    mut psi_token_balance: Uint128,
     asset_cost_in_psi: Uint128,
     token: Option<&Addr>,
     token_amount: Option<Uint128>,
@@ -727,8 +758,6 @@ fn save_reply_context(
             astro_token_balance -= token_amount.unwrap_or_default();
         }
     }
-    let mut psi_token_balance =
-        query_token_balance(deps.as_ref(), &psi_token, &env.contract.address);
     psi_token_balance -= asset_cost_in_psi;
 
     REPLY_CONTEXT.save(
@@ -964,11 +993,11 @@ fn update_governance_addr(
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
+pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
         QueryMsg::Version {} => to_binary(&query_version()),
-        QueryMsg::BuySimulation { asset } => to_binary(&query_buy_simulation(deps, asset)?),
+        QueryMsg::BuySimulation { asset } => to_binary(&query_buy_simulation(deps, env, asset)?),
     }
 }
 
@@ -1005,7 +1034,11 @@ fn query_version() -> String {
     CONTRACT_VERSION.to_owned()
 }
 
-fn query_buy_simulation(deps: Deps, buy_asset: Asset) -> StdResult<BuySimulationResponse> {
+fn query_buy_simulation(
+    deps: Deps,
+    env: Env,
+    buy_asset: Asset,
+) -> StdResult<BuySimulationResponse> {
     let config = CONFIG.load(deps.storage)?;
     let state = STATE.load(deps.storage)?;
 
@@ -1044,6 +1077,12 @@ fn query_buy_simulation(deps: Deps, buy_asset: Asset) -> StdResult<BuySimulation
             if asset_cost_in_psi.is_zero() {
                 return Err(ContractError::PaymentTooSmall {}.into());
             }
+            get_and_check_psi_balance(
+                deps,
+                &config.psi_token,
+                &env.contract.address,
+                asset_cost_in_psi,
+            )?;
 
             calculate_bonds(
                 deps,
@@ -1070,6 +1109,12 @@ fn query_buy_simulation(deps: Deps, buy_asset: Asset) -> StdResult<BuySimulation
             if asset_cost_in_psi.is_zero() {
                 return Err(ContractError::PaymentTooSmall {}.into());
             }
+            get_and_check_psi_balance(
+                deps,
+                &config.psi_token,
+                &env.contract.address,
+                asset_cost_in_psi,
+            )?;
 
             let PairWithBalances {
                 pair_info: _,

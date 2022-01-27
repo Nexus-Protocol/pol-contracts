@@ -34,6 +34,9 @@ pub enum ContractError {
 
     #[error("payment too small")]
     PaymentTooSmall {},
+
+    #[error("not enough psi tokens: {value}, but {required} required")]
+    NotEnoughPsiTokens { value: Uint128, required: Uint128 },
 }
 
 impl From<ContractError> for StdError {
