@@ -599,11 +599,12 @@ fn get_pair_and_balances(
     })?;
 
     let mut balances = vec![];
-    for a in assets {
-        let asset_balance = query_asset_balance(deps, &deps.querier, a, &pair_info.contract_addr)?;
+    for asset in assets {
+        let asset_balance =
+            query_asset_balance(deps, &deps.querier, asset, &pair_info.contract_addr)?;
         if asset_balance.is_zero() {
             return Err(ContractError::ZeroBalanceInPair {
-                token: a.to_string(),
+                token: asset.to_string(),
                 addr: pair_info.contract_addr.to_string(),
             });
         }
@@ -631,12 +632,12 @@ fn calculate_bonds_inner(
     psi_price: Decimal,
     psi_circulating_amount: Uint128,
     psi_total_supply: Uint128,
-    bcv: Decimal,
+    bond_control_var: Decimal,
 ) -> (Decimal, Uint128) {
     let psi_intrinsic_value =
         Decimal::from_ratio(psi_circulating_amount * psi_price, psi_total_supply);
     let debt_ratio = Decimal::from_ratio(bonds_issued, psi_total_supply);
-    let psi_premium = decimal_multiplication_in_256(debt_ratio, bcv);
+    let psi_premium = decimal_multiplication_in_256(debt_ratio, bond_control_var);
     let bond_price = psi_intrinsic_value + psi_premium;
     (
         bond_price,
@@ -655,7 +656,7 @@ fn calculate_bonds(
     ust_balance_of_pair: Uint128,
     psi_balance_of_pair: Uint128,
     bonds_issued: Uint128,
-    bcv: Decimal,
+    bond_control_var: Decimal,
     min_bonds_amount: Uint128,
     max_bonds_amount: Decimal,
 ) -> Result<(Decimal, Decimal, Uint128), ContractError> {
@@ -668,7 +669,7 @@ fn calculate_bonds(
         psi_price,
         psi_circulating_amount(deps, psi_token, psi_total_supply)?,
         psi_total_supply,
-        bcv,
+        bond_control_var,
     );
     let max_amount = psi_total_supply * max_bonds_amount;
     if bonds > max_amount {
