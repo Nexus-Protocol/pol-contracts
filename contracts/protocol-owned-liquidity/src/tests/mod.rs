@@ -338,6 +338,18 @@ fn buy_too_much_with_cw20_tokens_fails() {
         )
         .unwrap();
 
+    let query_resp = query(
+        deps.as_ref(),
+        env.clone(),
+        QueryMsg::BuySimulation {
+            asset: Asset {
+                info: AssetInfo::Token {
+                    contract_addr: Addr::unchecked(CW20_TOKEN),
+                },
+                amount: Uint128::new(2_000_000_000_000_000),
+            },
+        },
+    );
     let info = testing::mock_info(CW20_TOKEN, &[]);
     let resp = execute(
         deps.as_mut(),
@@ -359,6 +371,12 @@ fn buy_too_much_with_cw20_tokens_fails() {
             maximum: Uint128::new(1_000_000_000_000)
         }),
         resp
+    );
+    assert_eq!(
+        Err(StdError::generic_err(
+            "bonds amount 1685393258426966 exceeds limit 1000000000000"
+        )),
+        query_resp
     );
 }
 
@@ -990,6 +1008,18 @@ fn buy_with_coins_too_much_fails() {
         )
         .unwrap();
 
+    let query_resp = query(
+        deps.as_ref(),
+        env.clone(),
+        QueryMsg::BuySimulation {
+            asset: Asset {
+                info: AssetInfo::NativeToken {
+                    denom: UST.to_owned(),
+                },
+                amount: Uint128::new(2_000_000_000_000_000),
+            },
+        },
+    );
     let info = testing::mock_info(INVESTOR, &coins(2_000_000_000_000_000, UST));
     let resp = execute(
         deps.as_mut(),
@@ -1006,6 +1036,12 @@ fn buy_with_coins_too_much_fails() {
             maximum: Uint128::new(1_000_000_000_000),
         }),
         resp
+    );
+    assert_eq!(
+        Err(StdError::generic_err(
+            "bonds amount 1404494382022464 exceeds limit 1000000000000"
+        )),
+        query_resp
     );
 }
 

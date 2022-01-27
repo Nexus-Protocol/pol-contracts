@@ -1093,7 +1093,7 @@ fn query_buy_simulation(
                 state.bonds_issued,
                 config.bond_control_var,
                 Uint128::zero(),
-                Decimal::one(),
+                config.max_bonds_amount,
             )
         }
         AssetInfo::Token { contract_addr } => {
@@ -1136,7 +1136,7 @@ fn query_buy_simulation(
                 state.bonds_issued,
                 config.bond_control_var,
                 Uint128::zero(),
-                Decimal::one(),
+                config.max_bonds_amount,
             )
         }
     }?;
