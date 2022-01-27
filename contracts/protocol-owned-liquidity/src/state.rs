@@ -42,11 +42,34 @@ pub struct State {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct TokenBalance {
+    pub token: Addr,
+    pub token_name: String,
+    pub amount: Uint128,
+}
+
+impl TokenBalance {
+    pub fn new(token: Addr, token_name: String, amount: Uint128) -> Self {
+        Self {
+            token,
+            token_name,
+            amount,
+        }
+    }
+}
+
+impl From<(Addr, String, Uint128)> for TokenBalance {
+    fn from(value: (Addr, String, Uint128)) -> Self {
+        TokenBalance::new(value.0, value.1, value.2)
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ReplyContext {
     // Attributes have to be added to a response.
     pub attributes: Vec<Attribute>,
     // Balances of tokens before a rewards claim.
-    pub balances: Vec<(Addr, String, Uint128)>,
+    pub balances: Vec<TokenBalance>,
 }
 
 pub const CONFIG: Item<Config> = Item::new("config");
