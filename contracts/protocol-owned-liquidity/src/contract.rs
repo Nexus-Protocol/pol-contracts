@@ -683,6 +683,85 @@ fn calculate_bonds_inner(
     )
 }
 
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use cosmwasm_std::{Decimal, Uint128};
+
+    use super::calculate_bonds_inner;
+
+    #[test]
+    fn calculate_1() {
+        let (bond_price, bonds_amount) = calculate_bonds_inner(
+            Uint128::new(1_000_000_000),
+            Uint128::new(10_000_000_000_000),
+            Decimal::from_str("0.04").unwrap(),
+            Uint128::new(703_300_601_000_000),
+            Uint128::new(10_000_000_000_000_000),
+            Decimal::from_str("2.5").unwrap(),
+        );
+        assert_eq!(bond_price, Decimal::from_str("0.005313202404").unwrap());
+        assert_eq!(bonds_amount, Uint128::new(7_528_416_378));
+    }
+
+    #[test]
+    fn calculate_2() {
+        let (bond_price, bonds_amount) = calculate_bonds_inner(
+            Uint128::new(1_000_000),
+            Uint128::new(10_000_000_000_000),
+            Decimal::from_str("0.033").unwrap(),
+            Uint128::new(703_300_601_000_000),
+            Uint128::new(10_000_000_000_000_000),
+            Decimal::from_str("2.5").unwrap(),
+        );
+        assert_eq!(bond_price, Decimal::from_str("0.0048208919833").unwrap());
+        assert_eq!(bonds_amount, Uint128::new(6_845_206));
+    }
+
+    #[test]
+    fn calculate_when_zero_bonds_issued() {
+        let (bond_price, bonds_amount) = calculate_bonds_inner(
+            Uint128::new(1_000_000),
+            Uint128::zero(),
+            Decimal::from_str("0.033").unwrap(),
+            Uint128::new(703_300_601_000_000),
+            Uint128::new(10_000_000_000_000_000),
+            Decimal::from_str("2.5").unwrap(),
+        );
+        assert_eq!(bond_price, Decimal::from_str("0.0023208919833").unwrap());
+        assert_eq!(bonds_amount, Uint128::new(14_218_671));
+    }
+
+    #[test]
+    fn calculate_when_max_bonds_issued() {
+        let (bond_price, bonds_amount) = calculate_bonds_inner(
+            Uint128::new(1_000_000),
+            Uint128::new(10_000_000_000_000_000),
+            Decimal::from_str("0.033").unwrap(),
+            Uint128::new(703_300_601_000_000),
+            Uint128::new(10_000_000_000_000_000),
+            Decimal::from_str("2.5").unwrap(),
+        );
+        assert_eq!(bond_price, Decimal::from_str("2.5023208919833").unwrap());
+        assert_eq!(bonds_amount, Uint128::new(13_187));
+    }
+
+    #[test]
+    fn calculate_when_all_psi_circulating() {
+        let (bond_price, bonds_amount) = calculate_bonds_inner(
+            Uint128::new(1_000_000),
+            Uint128::new(10_000_000_000_000),
+            Decimal::from_str("0.033").unwrap(),
+            Uint128::new(10_000_000_000_000_000),
+            Uint128::new(10_000_000_000_000_000),
+            Decimal::from_str("2.5").unwrap(),
+        );
+        assert_eq!(bond_price, Decimal::from_str("0.0355").unwrap());
+        assert_eq!(bonds_amount, Uint128::new(929_577));
+    }
+}
+
 struct BondsCalculationResult {
     psi_price: Decimal,
     bond_price: Decimal,
