@@ -185,12 +185,10 @@ fn receive_cw20(
             if asset_cost_in_psi.is_zero() {
                 return Err(ContractError::PaymentTooSmall {});
             }
-            let psi_token_balance = get_and_check_psi_balance(
-                deps.as_ref(),
-                &config.psi_token,
-                &env.contract.address,
-                asset_cost_in_psi,
-            )?;
+            let mut psi_token_balance =
+                query_token_balance(deps.as_ref(), &config.psi_token, &env.contract.address);
+            check_psi_balance(psi_token_balance, asset_cost_in_psi)?;
+            psi_token_balance -= asset_cost_in_psi;
 
             let PairWithBalances {
                 pair_info: _,
@@ -218,6 +216,7 @@ fn receive_cw20(
                 min_amount,
                 config.max_bonds_amount,
             )?;
+            check_psi_balance(psi_token_balance, bonds_amount)?;
 
             save_state(deps.storage, state.bonds_issued + bonds_amount)?;
 
@@ -227,7 +226,6 @@ fn receive_cw20(
                 config.astro_token,
                 config.psi_token.clone(),
                 psi_token_balance,
-                asset_cost_in_psi,
                 Some(&cw20_token),
                 Some(cw20_msg.amount),
                 vec![
@@ -247,10 +245,11 @@ fn receive_cw20(
             )?;
 
             Ok(Response::new()
-                .add_submessage(linear_vesting(
+                .add_submessages(transfer_and_linear_vesting(
                     &env,
                     &config.vesting,
                     config.vesting_period,
+                    &config.psi_token,
                     bonds_amount,
                     cw20_msg.sender,
                 )?)
@@ -460,13 +459,14 @@ fn increase_allowances_and_provide_liquidity(
     Ok(result)
 }
 
-fn linear_vesting(
+fn transfer_and_linear_vesting(
     env: &Env,
     vesting: &Addr,
     period: u64,
+    psi_token: &Addr,
     amount: Uint128,
     recipient: String,
-) -> StdResult<SubMsg> {
+) -> StdResult<Vec<SubMsg>> {
     let cur_time = env.block.time;
     let vesting_schedule = VestingSchedule {
         start_time: cur_time.seconds(),
@@ -475,14 +475,24 @@ fn linear_vesting(
         amount,
     };
 
-    Ok(SubMsg::new(WasmMsg::Execute {
-        contract_addr: vesting.to_string(),
-        msg: to_binary(&services::vesting::ExecuteMsg::AddVestingSchedule {
-            addr: recipient,
-            schedule: vesting_schedule,
-        })?,
-        funds: vec![],
-    }))
+    Ok(vec![
+        SubMsg::new(WasmMsg::Execute {
+            contract_addr: psi_token.to_string(),
+            msg: to_binary(&cw20::Cw20ExecuteMsg::Transfer {
+                recipient: recipient.clone(),
+                amount,
+            })?,
+            funds: vec![],
+        }),
+        SubMsg::new(WasmMsg::Execute {
+            contract_addr: vesting.to_string(),
+            msg: to_binary(&services::vesting::ExecuteMsg::AddVestingSchedule {
+                addr: recipient,
+                schedule: vesting_schedule,
+            })?,
+            funds: vec![],
+        }),
+    ])
 }
 
 fn ceiled_mul_uint_decimal(a: Uint256, b: Decimal256) -> Uint256 {
@@ -539,12 +549,10 @@ fn execute_buy(
     if asset_cost_in_psi.is_zero() {
         return Err(ContractError::PaymentTooSmall {});
     }
-    let psi_token_balance = get_and_check_psi_balance(
-        deps.as_ref(),
-        &config.psi_token,
-        &env.contract.address,
-        asset_cost_in_psi,
-    )?;
+    let mut psi_token_balance =
+        query_token_balance(deps.as_ref(), &config.psi_token, &env.contract.address);
+    check_psi_balance(psi_token_balance, asset_cost_in_psi)?;
+    psi_token_balance -= asset_cost_in_psi;
 
     let BondsCalculationResult {
         psi_price,
@@ -561,6 +569,7 @@ fn execute_buy(
         min_bonds_amount,
         config.max_bonds_amount,
     )?;
+    check_psi_balance(psi_token_balance, bonds_amount)?;
 
     save_state(deps.storage, state.bonds_issued + bonds_amount)?;
 
@@ -570,7 +579,6 @@ fn execute_buy(
         config.astro_token,
         config.psi_token.clone(),
         psi_token_balance,
-        asset_cost_in_psi,
         None,
         None,
         vec![
@@ -590,10 +598,11 @@ fn execute_buy(
     )?;
 
     Ok(Response::new()
-        .add_submessage(linear_vesting(
+        .add_submessages(transfer_and_linear_vesting(
             &env,
             &config.vesting,
             config.vesting_period,
+            &config.psi_token,
             bonds_amount,
             info.sender.to_string(),
         )?)
@@ -723,20 +732,14 @@ fn calculate_bonds(
     })
 }
 
-fn get_and_check_psi_balance(
-    deps: Deps,
-    psi_token: &Addr,
-    addr: &Addr,
-    amount_required: Uint128,
-) -> Result<Uint128, ContractError> {
-    let psi_token_balance = query_token_balance(deps, psi_token, addr);
-    if psi_token_balance < amount_required {
+fn check_psi_balance(current: Uint128, required: Uint128) -> Result<(), ContractError> {
+    if current < required {
         return Err(ContractError::NotEnoughPsiTokens {
-            value: psi_token_balance,
-            required: amount_required,
+            value: current,
+            required,
         });
     }
-    Ok(psi_token_balance)
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -745,8 +748,7 @@ fn save_reply_context(
     env: &Env,
     astro_token: Addr,
     psi_token: Addr,
-    mut psi_token_balance: Uint128,
-    asset_cost_in_psi: Uint128,
+    psi_token_balance: Uint128,
     token: Option<&Addr>,
     token_amount: Option<Uint128>,
     attributes: Vec<Attribute>,
@@ -758,7 +760,6 @@ fn save_reply_context(
             astro_token_balance -= token_amount.unwrap_or_default();
         }
     }
-    psi_token_balance -= asset_cost_in_psi;
 
     REPLY_CONTEXT.save(
         deps.storage,
@@ -1047,11 +1048,7 @@ fn query_buy_simulation(
         return Err(StdError::generic_err("no funds"));
     }
 
-    let BondsCalculationResult {
-        psi_price,
-        bond_price,
-        bonds_amount,
-    } = match buy_asset.info {
+    let calc_result: Result<_, ContractError> = match buy_asset.info {
         AssetInfo::NativeToken { denom } => {
             if denom != UST {
                 return Err(StdError::generic_err(format!(
@@ -1077,14 +1074,12 @@ fn query_buy_simulation(
             if asset_cost_in_psi.is_zero() {
                 return Err(ContractError::PaymentTooSmall {}.into());
             }
-            get_and_check_psi_balance(
-                deps,
-                &config.psi_token,
-                &env.contract.address,
-                asset_cost_in_psi,
-            )?;
+            let mut psi_token_balance =
+                query_token_balance(deps, &config.psi_token, &env.contract.address);
+            check_psi_balance(psi_token_balance, asset_cost_in_psi)?;
+            psi_token_balance -= asset_cost_in_psi;
 
-            calculate_bonds(
+            let result = calculate_bonds(
                 deps,
                 asset_cost_in_psi,
                 &config.psi_token,
@@ -1094,7 +1089,10 @@ fn query_buy_simulation(
                 config.bond_control_var,
                 Uint128::zero(),
                 config.max_bonds_amount,
-            )
+            )?;
+            check_psi_balance(psi_token_balance, result.bonds_amount)?;
+
+            Ok(result)
         }
         AssetInfo::Token { contract_addr } => {
             let PairWithBalances {
@@ -1109,12 +1107,10 @@ fn query_buy_simulation(
             if asset_cost_in_psi.is_zero() {
                 return Err(ContractError::PaymentTooSmall {}.into());
             }
-            get_and_check_psi_balance(
-                deps,
-                &config.psi_token,
-                &env.contract.address,
-                asset_cost_in_psi,
-            )?;
+            let mut psi_token_balance =
+                query_token_balance(deps, &config.psi_token, &env.contract.address);
+            check_psi_balance(psi_token_balance, asset_cost_in_psi)?;
+            psi_token_balance -= asset_cost_in_psi;
 
             let PairWithBalances {
                 pair_info: _,
@@ -1127,7 +1123,7 @@ fn query_buy_simulation(
                 ],
             )?;
 
-            calculate_bonds(
+            let result = calculate_bonds(
                 deps,
                 asset_cost_in_psi,
                 &config.psi_token,
@@ -1137,14 +1133,18 @@ fn query_buy_simulation(
                 config.bond_control_var,
                 Uint128::zero(),
                 config.max_bonds_amount,
-            )
+            )?;
+            check_psi_balance(psi_token_balance, result.bonds_amount)?;
+
+            Ok(result)
         }
-    }?;
+    };
+    let calc_result = calc_result?;
 
     Ok(BuySimulationResponse {
-        bonds: bonds_amount,
-        bond_price,
-        psi_price,
+        bonds: calc_result.bonds_amount,
+        bond_price: calc_result.bond_price,
+        psi_price: calc_result.psi_price,
     })
 }
 

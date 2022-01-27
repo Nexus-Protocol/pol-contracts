@@ -312,8 +312,7 @@ fn buy_too_much_with_cw20_tokens_fails() {
                     cw_pair.contract_addr.as_str(),
                     &Uint128::new(30_000_000_000_000),
                 ),
-                (VESTING, &Uint128::new(3_000_000_000_000_000)),
-                (GOVERNANCE, &Uint128::new(1_000_000_000_000_000)),
+                (GOVERNANCE, &Uint128::new(4_000_000_000_000_000)),
             ],
         ),
         (
@@ -407,8 +406,7 @@ fn buy_with_cw20_tokens_fails_when_get_less_than_expect() {
                     cw20_pair.contract_addr.as_str(),
                     &Uint128::new(30_000_000_000_000),
                 ),
-                (VESTING, &Uint128::new(3_000_000_000_000_000)),
-                (GOVERNANCE, &Uint128::new(1_000_000_000_000_000)),
+                (GOVERNANCE, &Uint128::new(4_000_000_000_000_000)),
             ],
         ),
         (
@@ -458,7 +456,7 @@ fn buy_with_cw20_tokens_fails_when_get_less_than_expect() {
 }
 
 #[test]
-fn buy_fails_when_not_enough_psi_tokens_to_provide_liquidity() {
+fn buy_with_cw20_tokens_fails_when_not_enough_psi_tokens_to_provide_liquidity() {
     let (mut deps, env) = init();
     let cw_pair = psi_cw20token_pair();
     let ust_pair = psi_ust_pair();
@@ -481,8 +479,7 @@ fn buy_fails_when_not_enough_psi_tokens_to_provide_liquidity() {
                     cw_pair.contract_addr.as_str(),
                     &Uint128::new(30_000_000_000_000),
                 ),
-                (VESTING, &Uint128::new(3_000_000_000_000_000)),
-                (GOVERNANCE, &Uint128::new(1_000_000_000_000_000)),
+                (GOVERNANCE, &Uint128::new(4_000_000_000_000_000)),
             ],
         ),
         (
@@ -554,6 +551,101 @@ fn buy_fails_when_not_enough_psi_tokens_to_provide_liquidity() {
 }
 
 #[test]
+fn buy_with_cw20_tokens_fails_when_not_enough_psi_tokens_for_vesting() {
+    let (mut deps, env) = init();
+    let cw_pair = psi_cw20token_pair();
+    let ust_pair = psi_ust_pair();
+    deps.querier.set_ust_balances(&[(
+        ust_pair.contract_addr.as_str(),
+        &Uint128::new(400_000_000_000),
+    )]);
+    deps.querier
+        .set_total_supply(Uint128::new(10_000_000_000_000_000));
+    deps.querier.set_token_balances(&[
+        (
+            PSI_TOKEN,
+            &[
+                (env.contract.address.as_str(), &Uint128::new(60_000_000_100)),
+                (
+                    ust_pair.contract_addr.as_str(),
+                    &Uint128::new(10_000_000_000_000),
+                ),
+                (
+                    cw_pair.contract_addr.as_str(),
+                    &Uint128::new(30_000_000_000_000),
+                ),
+                (GOVERNANCE, &Uint128::new(4_000_000_000_000_000)),
+            ],
+        ),
+        (
+            CW20_TOKEN,
+            &[(
+                cw_pair.contract_addr.as_str(),
+                &Uint128::new(1_000_000_000_000),
+            )],
+        ),
+        (
+            ASTRO_TOKEN,
+            &[(env.contract.address.as_str(), &Uint128::zero())],
+        ),
+    ]);
+    instantiate_with_pairs(
+        &mut deps,
+        env.clone(),
+        vec![cw_pair.clone(), ust_pair.clone()],
+    );
+    STATE
+        .save(
+            &mut deps.storage,
+            &State {
+                bonds_issued: Uint128::new(4_000_000_000_000_000),
+            },
+        )
+        .unwrap();
+
+    let query_resp = query(
+        deps.as_ref(),
+        env.clone(),
+        QueryMsg::BuySimulation {
+            asset: Asset {
+                info: AssetInfo::Token {
+                    contract_addr: Addr::unchecked(CW20_TOKEN),
+                },
+                amount: Uint128::new(2_000_000_000),
+            },
+        },
+    );
+    let info = testing::mock_info(CW20_TOKEN, &[]);
+    let resp = execute(
+        deps.as_mut(),
+        env.clone(),
+        info,
+        ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: INVESTOR.to_owned(),
+            amount: Uint128::new(2_000_000_000),
+            msg: to_binary(&ExecuteMsg::Buy {
+                min_amount: min_bonds_amount(),
+            })
+            .unwrap(),
+        }),
+    );
+
+    assert_eq!(
+        Err(ContractError::NotEnoughPsiTokens {
+            value: Uint128::new(100),
+            required: Uint128::new(1685393258)
+        }),
+        resp
+    );
+    assert_eq!(
+        Err(StdError::generic_err(
+            "not enough psi tokens: 100, but 1685393258 required"
+        )),
+        query_resp
+    );
+}
+
+#[test]
 fn buy_with_cw20_tokens() {
     let (mut deps, env) = init();
     let cw_pair = psi_cw20token_pair();
@@ -580,8 +672,7 @@ fn buy_with_cw20_tokens() {
                     cw_pair.contract_addr.as_str(),
                     &Uint128::new(30_000_000_000_000),
                 ),
-                (VESTING, &Uint128::new(3_000_000_000_000_000)),
-                (GOVERNANCE, &Uint128::new(1_000_000_000_000_000)),
+                (GOVERNANCE, &Uint128::new(4_000_000_000_000_000)),
             ],
         ),
         (
@@ -639,6 +730,15 @@ fn buy_with_cw20_tokens() {
 
     assert_eq!(
         Ok(Response::new()
+            .add_submessage(SubMsg::new(WasmMsg::Execute {
+                contract_addr: PSI_TOKEN.to_owned(),
+                msg: to_binary(&cw20::Cw20ExecuteMsg::Transfer {
+                    recipient: INVESTOR.to_owned(),
+                    amount: Uint128::new(1685393258),
+                })
+                .unwrap(),
+                funds: vec![],
+            }))
             .add_submessage(SubMsg::new(WasmMsg::Execute {
                 contract_addr: VESTING.to_string(),
                 msg: to_binary(&services::vesting::ExecuteMsg::AddVestingSchedule {
@@ -994,8 +1094,7 @@ fn buy_with_coins_too_much_fails() {
                 pair.contract_addr.as_str(),
                 &Uint128::new(10_000_000_000_000),
             ),
-            (VESTING, &Uint128::new(3_000_000_000_000_000)),
-            (GOVERNANCE, &Uint128::new(1_000_000_000_000_000)),
+            (GOVERNANCE, &Uint128::new(4_000_000_000_000_000)),
         ],
     )]);
     instantiate_with_pairs(&mut deps, env.clone(), vec![pair.clone()]);
@@ -1064,8 +1163,7 @@ fn buy_with_coins_fails_when_get_less_than_expect() {
                 pair.contract_addr.as_str(),
                 &Uint128::new(10_000_000_000_000),
             ),
-            (VESTING, &Uint128::new(3_000_000_000_000_000)),
-            (GOVERNANCE, &Uint128::new(1_000_000_000_000_000)),
+            (GOVERNANCE, &Uint128::new(4_000_000_000_000_000)),
         ],
     )]);
     instantiate_with_pairs(&mut deps, env.clone(), vec![pair.clone()]);
@@ -1098,6 +1196,150 @@ fn buy_with_coins_fails_when_get_less_than_expect() {
 }
 
 #[test]
+fn buy_with_coins_fails_when_not_enough_psi_tokens_to_provide_liquidity() {
+    let (mut deps, env) = init();
+    let pair = psi_ust_pair();
+    deps.querier
+        .set_ust_balances(&[(pair.contract_addr.as_str(), &Uint128::new(400_000_000_000))]);
+    deps.querier
+        .set_total_supply(Uint128::new(10_000_000_000_000_000));
+    deps.querier.set_token_balances(&[
+        (
+            PSI_TOKEN,
+            &[
+                (env.contract.address.as_str(), &Uint128::new(500_000_000)),
+                (
+                    pair.contract_addr.as_str(),
+                    &Uint128::new(10_000_000_000_000),
+                ),
+                (GOVERNANCE, &Uint128::new(4_000_000_000_000_000)),
+            ],
+        ),
+        (
+            ASTRO_TOKEN,
+            &[(env.contract.address.as_str(), &Uint128::zero())],
+        ),
+    ]);
+    instantiate_with_pairs(&mut deps, env.clone(), vec![pair.clone()]);
+    STATE
+        .save(
+            &mut deps.storage,
+            &State {
+                bonds_issued: Uint128::new(4_000_000_000_000_000),
+            },
+        )
+        .unwrap();
+
+    let query_resp = query(
+        deps.as_ref(),
+        env.clone(),
+        QueryMsg::BuySimulation {
+            asset: Asset {
+                info: AssetInfo::NativeToken {
+                    denom: UST.to_owned(),
+                },
+                amount: Uint128::new(2_000_000_000),
+            },
+        },
+    );
+    let info = testing::mock_info(INVESTOR, &coins(2_000_000_000, UST));
+    let resp = execute(
+        deps.as_mut(),
+        env.clone(),
+        info,
+        ExecuteMsg::Buy {
+            min_amount: min_bonds_amount(),
+        },
+    );
+
+    assert_eq!(
+        Err(ContractError::NotEnoughPsiTokens {
+            value: Uint128::new(500_000_000),
+            required: Uint128::new(49_999_999_750)
+        }),
+        resp
+    );
+    assert_eq!(
+        Err(StdError::generic_err(
+            "not enough psi tokens: 500000000, but 49999999750 required"
+        )),
+        query_resp
+    );
+}
+
+#[test]
+fn buy_with_coins_fails_when_not_enough_psi_tokens_for_vesting() {
+    let (mut deps, env) = init();
+    let pair = psi_ust_pair();
+    deps.querier
+        .set_ust_balances(&[(pair.contract_addr.as_str(), &Uint128::new(400_000_000_000))]);
+    deps.querier
+        .set_total_supply(Uint128::new(10_000_000_000_000_000));
+    deps.querier.set_token_balances(&[
+        (
+            PSI_TOKEN,
+            &[
+                (env.contract.address.as_str(), &Uint128::new(50_000_000_000)),
+                (
+                    pair.contract_addr.as_str(),
+                    &Uint128::new(10_000_000_000_000),
+                ),
+                (GOVERNANCE, &Uint128::new(4_000_000_000_000_000)),
+            ],
+        ),
+        (
+            ASTRO_TOKEN,
+            &[(env.contract.address.as_str(), &Uint128::zero())],
+        ),
+    ]);
+    instantiate_with_pairs(&mut deps, env.clone(), vec![pair.clone()]);
+    STATE
+        .save(
+            &mut deps.storage,
+            &State {
+                bonds_issued: Uint128::new(4_000_000_000_000_000),
+            },
+        )
+        .unwrap();
+
+    let query_resp = query(
+        deps.as_ref(),
+        env.clone(),
+        QueryMsg::BuySimulation {
+            asset: Asset {
+                info: AssetInfo::NativeToken {
+                    denom: UST.to_owned(),
+                },
+                amount: Uint128::new(2_000_000_000),
+            },
+        },
+    );
+    let info = testing::mock_info(INVESTOR, &coins(2_000_000_000, UST));
+    let resp = execute(
+        deps.as_mut(),
+        env.clone(),
+        info,
+        ExecuteMsg::Buy {
+            min_amount: min_bonds_amount(),
+        },
+    );
+
+    assert_eq!(
+        Err(ContractError::NotEnoughPsiTokens {
+            value: Uint128::new(250),
+            required: Uint128::new(1404494375)
+        }),
+        resp
+    );
+    assert_eq!(
+        Err(StdError::generic_err(
+            "not enough psi tokens: 250, but 1404494375 required"
+        )),
+        query_resp
+    );
+}
+
+#[test]
 fn buy_with_coins() {
     let (mut deps, env) = init();
     let pair = psi_ust_pair();
@@ -1117,8 +1359,7 @@ fn buy_with_coins() {
                     pair.contract_addr.as_str(),
                     &Uint128::new(10_000_000_000_000),
                 ),
-                (VESTING, &Uint128::new(3_000_000_000_000_000)),
-                (GOVERNANCE, &Uint128::new(1_000_000_000_000_000)),
+                (GOVERNANCE, &Uint128::new(4_000_000_000_000_000)),
             ],
         ),
         (
@@ -1170,9 +1411,18 @@ fn buy_with_coins() {
     assert_eq!(
         Ok(Response::new()
             .add_submessage(SubMsg::new(WasmMsg::Execute {
-                contract_addr: VESTING.to_string(),
+                contract_addr: PSI_TOKEN.to_owned(),
+                msg: to_binary(&cw20::Cw20ExecuteMsg::Transfer {
+                    recipient: INVESTOR.to_owned(),
+                    amount: Uint128::new(1_404_494_375),
+                })
+                .unwrap(),
+                funds: vec![],
+            }))
+            .add_submessage(SubMsg::new(WasmMsg::Execute {
+                contract_addr: VESTING.to_owned(),
                 msg: to_binary(&services::vesting::ExecuteMsg::AddVestingSchedule {
-                    addr: INVESTOR.to_string(),
+                    addr: INVESTOR.to_owned(),
                     schedule: VestingSchedule {
                         start_time: env.block.time.seconds(),
                         end_time: env.block.time.plus_seconds(VESTING_PERIOD).seconds(),
@@ -1310,8 +1560,7 @@ fn claim_rewards() {
                     cw_pair.contract_addr.as_str(),
                     &Uint128::new(10_000_000_000_000),
                 ),
-                (VESTING, &Uint128::new(3_000_000_000_000_000)),
-                (GOVERNANCE, &Uint128::new(1_000_000_000_000_000)),
+                (GOVERNANCE, &Uint128::new(4_000_000_000_000_000)),
             ],
         ),
         (
