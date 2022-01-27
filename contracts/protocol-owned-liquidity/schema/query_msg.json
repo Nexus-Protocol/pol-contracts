@@ -17,6 +17,18 @@
     {
       "type": "object",
       "required": [
+        "version"
+      ],
+      "properties": {
+        "version": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
         "buy_simulation"
       ],
       "properties": {

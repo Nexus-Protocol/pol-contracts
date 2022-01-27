@@ -119,6 +119,18 @@
             "update_config": {
               "type": "object",
               "properties": {
+                "astro_generator": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "astro_token": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "autostake_lp_tokens": {
                   "type": [
                     "boolean",
@@ -136,12 +148,6 @@
                   ]
                 },
                 "community_pool": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "factory": {
                   "type": [
                     "string",
                     "null"
@@ -252,13 +258,13 @@
               "type": "object",
               "required": [
                 "addr",
-                "approve_period"
+                "seconds_to_wait_for_accept_gov_tx"
               ],
               "properties": {
                 "addr": {
                   "type": "string"
                 },
-                "approve_period": {
+                "seconds_to_wait_for_accept_gov_tx": {
                   "type": "integer",
                   "format": "uint64",
                   "minimum": 0.0

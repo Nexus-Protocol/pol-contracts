@@ -3,11 +3,12 @@
   "title": "ConfigResponse",
   "type": "object",
   "required": [
+    "astro_generator",
+    "astro_token",
     "autostake_lp_tokens",
     "bond_control_var",
     "community_pool",
     "excluded_psi",
-    "factory",
     "governance",
     "max_bonds_amount",
     "owner",
@@ -17,6 +18,12 @@
     "vesting_period"
   ],
   "properties": {
+    "astro_generator": {
+      "type": "string"
+    },
+    "astro_token": {
+      "type": "string"
+    },
     "autostake_lp_tokens": {
       "type": "boolean"
     },
@@ -31,9 +38,6 @@
       "items": {
         "type": "string"
       }
-    },
-    "factory": {
-      "type": "string"
     },
     "governance": {
       "type": "string"
