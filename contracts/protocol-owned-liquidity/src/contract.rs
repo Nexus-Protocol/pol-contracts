@@ -918,7 +918,7 @@ fn update_governance_addr(
 ) -> Result<Response, ContractError> {
     let cur_time = env.block.time.seconds();
     let gov_update = GovernanceUpdateState {
-        new_governance: deps.api.addr_validate(&addr)?,
+        new_governance: addr_validate_to_lower(deps.api, &addr)?,
         wait_approve_until: cur_time + seconds_to_wait_for_accept_gov_tx,
     };
     GOVERNANCE_UPDATE.save(deps.storage, &gov_update)?;
@@ -929,6 +929,7 @@ fn update_governance_addr(
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
+        QueryMsg::Version {} => to_binary(&query_version()),
         QueryMsg::BuySimulation { asset } => to_binary(&query_buy_simulation(deps, asset)?),
     }
 }
@@ -960,6 +961,10 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
         astro_generator: config.astro_generator.to_string(),
         astro_token: config.astro_token.to_string(),
     })
+}
+
+fn query_version() -> String {
+    CONTRACT_VERSION.to_owned()
 }
 
 fn query_buy_simulation(deps: Deps, buy_asset: Asset) -> StdResult<BuySimulationResponse> {

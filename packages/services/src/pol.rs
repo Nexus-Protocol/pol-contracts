@@ -90,6 +90,7 @@ pub enum Cw20HookMsg {
 #[serde(rename_all = "snake_case")]
 pub enum QueryMsg {
     Config {},
+    Version {},
     BuySimulation { asset: Asset },
 }
 

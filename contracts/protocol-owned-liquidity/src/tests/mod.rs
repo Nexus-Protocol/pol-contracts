@@ -1558,3 +1558,13 @@ fn query_config() {
         resp,
     );
 }
+
+#[test]
+fn query_version() {
+    let (mut deps, env) = init();
+    instantiate_with_pairs(&mut deps, env.clone(), vec![]);
+
+    let resp = from_binary(&query(deps.as_ref(), env, QueryMsg::Version {}).unwrap());
+
+    assert_eq!(Ok(env!("CARGO_PKG_VERSION").to_owned()), resp,);
+}
