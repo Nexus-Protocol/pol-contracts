@@ -76,7 +76,7 @@ pub enum GovernanceMsg {
     },
     UpdateGovernanceContract {
         addr: String,
-        approve_period: u64,
+        seconds_to_wait_for_accept_gov_tx: u64,
     },
 }
 

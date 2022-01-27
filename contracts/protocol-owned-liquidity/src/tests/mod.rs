@@ -409,7 +409,7 @@ fn buy_with_cw20_tokens_fails_when_get_less_than_expect() {
         ExecuteMsg::Receive(Cw20ReceiveMsg {
             sender: INVESTOR.to_owned(),
             amount: Uint128::new(2_000_000_000),
-            msg: cosmwasm_std::to_binary(&ExecuteMsg::Buy {
+            msg: to_binary(&ExecuteMsg::Buy {
                 min_amount: Uint128::new(1_000_000_000_000),
             })
             .unwrap(),
@@ -1314,7 +1314,7 @@ fn do_not_accept_any_governance_msg_from_non_governance_contract() {
         ExecuteMsg::Governance {
             msg: GovernanceMsg::UpdateGovernanceContract {
                 addr: GOVERNANCE.to_owned(),
-                approve_period: 10,
+                seconds_to_wait_for_accept_gov_tx: 10,
             },
         },
     );
@@ -1452,7 +1452,7 @@ fn too_late_to_accept_governance_contract() {
         ExecuteMsg::Governance {
             msg: GovernanceMsg::UpdateGovernanceContract {
                 addr: "new_governance_addr".to_owned(),
-                approve_period: 10,
+                seconds_to_wait_for_accept_gov_tx: 10,
             },
         },
     )
@@ -1481,7 +1481,7 @@ fn deny_accepting_governance_contract_from_not_new_governance_address() {
         ExecuteMsg::Governance {
             msg: GovernanceMsg::UpdateGovernanceContract {
                 addr: "new_governance".to_owned(),
-                approve_period: 10,
+                seconds_to_wait_for_accept_gov_tx: 10,
             },
         },
     )
@@ -1507,7 +1507,7 @@ fn accept_new_governance_contract() {
         ExecuteMsg::Governance {
             msg: GovernanceMsg::UpdateGovernanceContract {
                 addr: "new_governance".to_owned(),
-                approve_period: 10,
+                seconds_to_wait_for_accept_gov_tx: 10,
             },
         },
     )
@@ -1533,7 +1533,7 @@ fn query_config() {
         vec![ust_pair.clone(), pair1.clone(), pair2.clone()],
     );
 
-    let resp = cosmwasm_std::from_binary(&query(deps.as_ref(), env, QueryMsg::Config {}).unwrap());
+    let resp = from_binary(&query(deps.as_ref(), env, QueryMsg::Config {}).unwrap());
 
     assert_eq!(
         Ok(ConfigResponse {

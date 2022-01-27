@@ -150,8 +150,8 @@ pub fn execute(
                 }
                 GovernanceMsg::UpdateGovernanceContract {
                     addr,
-                    approve_period,
-                } => update_governance_addr(deps, env, addr, approve_period),
+                    seconds_to_wait_for_accept_gov_tx,
+                } => update_governance_addr(deps, env, addr, seconds_to_wait_for_accept_gov_tx),
             }
         }
     }
@@ -914,12 +914,12 @@ fn update_governance_addr(
     deps: DepsMut,
     env: Env,
     addr: String,
-    approve_period: u64,
+    seconds_to_wait_for_accept_gov_tx: u64,
 ) -> Result<Response, ContractError> {
     let cur_time = env.block.time.seconds();
     let gov_update = GovernanceUpdateState {
         new_governance: deps.api.addr_validate(&addr)?,
-        wait_approve_until: cur_time + approve_period,
+        wait_approve_until: cur_time + seconds_to_wait_for_accept_gov_tx,
     };
     GOVERNANCE_UPDATE.save(deps.storage, &gov_update)?;
     Ok(Response::new())
