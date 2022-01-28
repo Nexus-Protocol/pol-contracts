@@ -217,6 +217,7 @@ fn receive_cw20(
                 config.max_bonds_amount,
             )?;
             check_psi_balance(psi_token_balance, bonds_amount)?;
+            psi_token_balance -= bonds_amount;
 
             save_state(deps.storage, state.bonds_issued + bonds_amount)?;
 
@@ -570,6 +571,7 @@ fn execute_buy(
         config.max_bonds_amount,
     )?;
     check_psi_balance(psi_token_balance, bonds_amount)?;
+    psi_token_balance -= bonds_amount;
 
     save_state(deps.storage, state.bonds_issued + bonds_amount)?;
 

@@ -857,7 +857,7 @@ fn buy_with_cw20_tokens() {
                 contract_addr: PSI_TOKEN.to_string(),
                 msg: to_binary(&cw20::Cw20ExecuteMsg::Transfer {
                     recipient: COMMUNITY_POOL.to_string(),
-                    amount: Uint128::new(30_000_000),
+                    amount: Uint128::new(1_715_393_258),
                 })
                 .unwrap(),
                 funds: vec![],
@@ -871,7 +871,7 @@ fn buy_with_cw20_tokens() {
             .add_attribute("provided_liquidity_in_psi", "60000000000")
             .add_attribute("provided_liquidity_in_asset", "2000000000")
             .add_attribute("astro_tokens_claimed", "10000000")
-            .add_attribute("psi_tokens_claimed", "30000000"),
+            .add_attribute("psi_tokens_claimed", "1715393258"),
         reply_resp
     );
 }
@@ -1518,7 +1518,7 @@ fn buy_with_coins() {
                 contract_addr: PSI_TOKEN.to_string(),
                 msg: to_binary(&cw20::Cw20ExecuteMsg::Transfer {
                     recipient: COMMUNITY_POOL.to_string(),
-                    amount: Uint128::new(29_999_750),
+                    amount: Uint128::new(1_434_494_125),
                 })
                 .unwrap(),
                 funds: vec![],
@@ -1532,7 +1532,7 @@ fn buy_with_coins() {
             .add_attribute("provided_liquidity_in_psi", "49999999750")
             .add_attribute("provided_liquidity_in_asset", "1999999990")
             .add_attribute("astro_tokens_claimed", "10000000")
-            .add_attribute("psi_tokens_claimed", "29999750")),
+            .add_attribute("psi_tokens_claimed", "1434494125")),
         reply_resp
     );
 }

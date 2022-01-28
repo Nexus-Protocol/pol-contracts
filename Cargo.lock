@@ -465,7 +465,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "nexus-vesting"
+name = "nexus-pol-vesting"
 version = "1.0.0"
 dependencies = [
  "cosmwasm-schema",

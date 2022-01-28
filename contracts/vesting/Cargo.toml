@@ -5,7 +5,7 @@ documentation = "todo"
 edition = "2018"
 homepage = "todo"
 license = "Apache-2.0"
-name = "nexus-vesting"
+name = "nexus-pol-vesting"
 repository = "https://github.com/Nexus-Protocol/services-contracts"
 version = "1.0.0"
 
