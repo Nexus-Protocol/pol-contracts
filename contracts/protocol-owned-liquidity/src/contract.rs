@@ -480,7 +480,7 @@ fn transfer_and_linear_vesting(
         SubMsg::new(WasmMsg::Execute {
             contract_addr: psi_token.to_string(),
             msg: to_binary(&cw20::Cw20ExecuteMsg::Transfer {
-                recipient: recipient.clone(),
+                recipient: vesting.to_string(),
                 amount,
             })?,
             funds: vec![],

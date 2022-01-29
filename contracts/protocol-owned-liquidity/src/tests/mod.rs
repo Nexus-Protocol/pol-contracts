@@ -733,7 +733,7 @@ fn buy_with_cw20_tokens() {
             .add_submessage(SubMsg::new(WasmMsg::Execute {
                 contract_addr: PSI_TOKEN.to_owned(),
                 msg: to_binary(&cw20::Cw20ExecuteMsg::Transfer {
-                    recipient: INVESTOR.to_owned(),
+                    recipient: VESTING.to_owned(),
                     amount: Uint128::new(1685393258),
                 })
                 .unwrap(),
@@ -1413,7 +1413,7 @@ fn buy_with_coins() {
             .add_submessage(SubMsg::new(WasmMsg::Execute {
                 contract_addr: PSI_TOKEN.to_owned(),
                 msg: to_binary(&cw20::Cw20ExecuteMsg::Transfer {
-                    recipient: INVESTOR.to_owned(),
+                    recipient: VESTING.to_owned(),
                     amount: Uint128::new(1_404_494_375),
                 })
                 .unwrap(),
