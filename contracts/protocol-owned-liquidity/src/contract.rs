@@ -1080,6 +1080,7 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
         QueryMsg::Version {} => to_binary(&query_version()),
         QueryMsg::BuySimulation { asset } => to_binary(&query_buy_simulation(deps, env, asset)?),
+        QueryMsg::PsiCirculatingSupply {} => to_binary(&query_psi_circulating_supply(deps)?),
     }
 }
 
@@ -1114,6 +1115,14 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
 
 fn query_version() -> String {
     CONTRACT_VERSION.to_owned()
+}
+
+fn query_psi_circulating_supply(deps: Deps) -> StdResult<Uint128> {
+    let config = CONFIG.load(deps.storage)?;
+
+    let psi_total_supply = query_supply(&deps.querier, &config.psi_token)?;
+
+    psi_circulating_amount(deps, &config.psi_token, psi_total_supply)
 }
 
 fn query_buy_simulation(

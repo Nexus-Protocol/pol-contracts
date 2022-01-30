@@ -1971,3 +1971,22 @@ fn query_version() {
 
     assert_eq!(Ok(env!("CARGO_PKG_VERSION").to_owned()), resp,);
 }
+
+#[test]
+fn query_psi_circulating_supply() {
+    let (mut deps, env) = init();
+    deps.querier
+        .set_total_supply(Uint128::new(10_000_000_000_000_000));
+    deps.querier.set_token_balances(&[(
+        PSI_TOKEN,
+        &[
+            (GOVERNANCE, &Uint128::new(4_000_000_000_000_000)),
+            (VESTING, &Uint128::new(1_000_000_000_000_000)),
+        ],
+    )]);
+    instantiate_with_pairs(&mut deps, env.clone(), vec![]);
+
+    let resp = from_binary(&query(deps.as_ref(), env, QueryMsg::PsiCirculatingSupply {}).unwrap());
+
+    assert_eq!(Ok("5000000000000000".to_owned()), resp);
+}

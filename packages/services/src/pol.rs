@@ -92,6 +92,7 @@ pub enum QueryMsg {
     Config {},
     Version {},
     BuySimulation { asset: Asset },
+    PsiCirculatingSupply {},
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
