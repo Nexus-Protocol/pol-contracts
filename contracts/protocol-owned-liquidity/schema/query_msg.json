@@ -45,6 +45,18 @@
         }
       },
       "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "psi_circulating_supply"
+      ],
+      "properties": {
+        "psi_circulating_supply": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
     }
   ],
   "definitions": {
