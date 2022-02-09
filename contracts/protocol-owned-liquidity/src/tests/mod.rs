@@ -6,10 +6,10 @@ use cosmwasm_std::{
 use cosmwasm_std::{testing, to_binary};
 use cw0::{Expiration, PaymentError};
 use cw20::Cw20ReceiveMsg;
-use services::pol::{
+use nexus_pol_services::pol::{
     BuySimulationResponse, ConfigResponse, ExecuteMsg, GovernanceMsg, InstantiateMsg, QueryMsg,
 };
-use services::vesting::VestingSchedule;
+use nexus_pol_services::vesting::VestingSchedule;
 use std::str::FromStr;
 
 mod mock_querier;
@@ -38,6 +38,7 @@ fn proper_instantiation() {
             governance: GOVERNANCE.to_owned(),
             pairs: vec![pair.contract_addr.to_string()],
             psi_token: PSI_TOKEN.to_owned(),
+            min_staked_psi_amount: Uint128::new(100),
             vesting: VESTING.to_owned(),
             vesting_period: VESTING_PERIOD,
             bond_control_var: bcv(),
@@ -64,6 +65,7 @@ fn proper_instantiation() {
             owner: Addr::unchecked(CREATOR),
             governance: Addr::unchecked(GOVERNANCE),
             psi_token: Addr::unchecked(PSI_TOKEN),
+            min_staked_psi_amount: Uint128::new(100),
             vesting: Addr::unchecked(VESTING),
             vesting_period: VESTING_PERIOD,
             bond_control_var: bcv(),
@@ -100,6 +102,7 @@ fn instantiation_fails_when_wrong_case_address() {
             governance: GOVERNANCE.to_owned(),
             pairs: vec![pair.contract_addr.to_string(), wrong_case_addr.clone()],
             psi_token: PSI_TOKEN.to_owned(),
+            min_staked_psi_amount: Uint128::new(100),
             vesting: VESTING.to_owned(),
             vesting_period: VESTING_PERIOD,
             bond_control_var: bcv(),
@@ -166,6 +169,44 @@ fn buy_with_non_allowed_cw20_tokens_fails() {
         ))),
         query_resp
     );
+}
+
+#[test]
+fn buy_with_cw20_tokens_fails_when_not_enough_psi_staked() {
+    let (mut deps, env) = init();
+    let pair = psi_cw20token_pair();
+    instantiate_with_pairs(&mut deps, env.clone(), vec![pair.clone()]);
+    deps.querier.set_token_balances(&[
+        (
+            PSI_TOKEN,
+            &[(pair.contract_addr.as_str(), &Uint128::new(100_000_000_000))],
+        ),
+        (
+            CW20_TOKEN,
+            &[(
+                pair.contract_addr.as_str(),
+                &Uint128::new(10_000_000_000_000),
+            )],
+        ),
+    ]);
+    set_staked_psi(&mut deps, Uint128::new(10));
+
+    let info = testing::mock_info(CW20_TOKEN, &[]);
+    let resp = execute(
+        deps.as_mut(),
+        env,
+        info,
+        ExecuteMsg::Receive(Cw20ReceiveMsg {
+            sender: INVESTOR.to_owned(),
+            amount: Uint128::new(50),
+            msg: to_binary(&ExecuteMsg::Buy {
+                min_amount: min_bonds_amount(),
+            })
+            .unwrap(),
+        }),
+    );
+
+    assert_eq!(Err(ContractError::Unauthorized {}), resp);
 }
 
 #[test]
@@ -741,15 +782,17 @@ fn buy_with_cw20_tokens() {
             }))
             .add_submessage(SubMsg::new(WasmMsg::Execute {
                 contract_addr: VESTING.to_string(),
-                msg: to_binary(&services::vesting::ExecuteMsg::AddVestingSchedule {
-                    addr: INVESTOR.to_string(),
-                    schedule: VestingSchedule {
-                        start_time: env.block.time.seconds(),
-                        end_time: env.block.time.plus_seconds(VESTING_PERIOD).seconds(),
-                        cliff_end_time: env.block.time.seconds(),
-                        amount: Uint128::new(1685393258),
+                msg: to_binary(
+                    &nexus_pol_services::vesting::ExecuteMsg::AddVestingSchedule {
+                        addr: INVESTOR.to_string(),
+                        schedule: VestingSchedule {
+                            start_time: env.block.time.seconds(),
+                            end_time: env.block.time.plus_seconds(VESTING_PERIOD).seconds(),
+                            cliff_end_time: env.block.time.seconds(),
+                            amount: Uint128::new(1685393258),
+                        }
                     }
-                })
+                )
                 .unwrap(),
                 funds: vec![],
             }))
@@ -990,6 +1033,26 @@ fn buy_with_zero_coins_fails() {
 
     assert_eq!(Err(ContractError::Payment(PaymentError::NoFunds {})), resp);
     assert_eq!(Err(StdError::generic_err("no funds")), query_resp);
+}
+
+#[test]
+fn buy_with_coins_fails_when_not_enough_psi_staked() {
+    let (mut deps, env) = init();
+    let ust_pair = psi_ust_pair();
+    instantiate_with_pairs(&mut deps, env.clone(), vec![ust_pair]);
+    set_staked_psi(&mut deps, Uint128::new(10));
+
+    let info = testing::mock_info(INVESTOR, &coins(10_000_000, UST));
+    let resp = execute(
+        deps.as_mut(),
+        env,
+        info,
+        ExecuteMsg::Buy {
+            min_amount: min_bonds_amount(),
+        },
+    );
+
+    assert_eq!(Err(ContractError::Unauthorized {}), resp);
 }
 
 #[test]
@@ -1421,15 +1484,17 @@ fn buy_with_coins() {
             }))
             .add_submessage(SubMsg::new(WasmMsg::Execute {
                 contract_addr: VESTING.to_owned(),
-                msg: to_binary(&services::vesting::ExecuteMsg::AddVestingSchedule {
-                    addr: INVESTOR.to_owned(),
-                    schedule: VestingSchedule {
-                        start_time: env.block.time.seconds(),
-                        end_time: env.block.time.plus_seconds(VESTING_PERIOD).seconds(),
-                        cliff_end_time: env.block.time.seconds(),
-                        amount: Uint128::new(1_404_494_375),
+                msg: to_binary(
+                    &nexus_pol_services::vesting::ExecuteMsg::AddVestingSchedule {
+                        addr: INVESTOR.to_owned(),
+                        schedule: VestingSchedule {
+                            start_time: env.block.time.seconds(),
+                            end_time: env.block.time.plus_seconds(VESTING_PERIOD).seconds(),
+                            cliff_end_time: env.block.time.seconds(),
+                            amount: Uint128::new(1_404_494_375),
+                        }
                     }
-                })
+                )
                 .unwrap(),
                 funds: vec![],
             }))
@@ -1677,6 +1742,7 @@ fn do_not_accept_any_governance_msg_from_non_governance_contract() {
         ExecuteMsg::Governance {
             msg: GovernanceMsg::UpdateConfig {
                 psi_token: None,
+                min_staked_psi_amount: None,
                 vesting: None,
                 vesting_period: None,
                 bond_control_var: None,
@@ -1748,6 +1814,7 @@ fn update_config() {
         ExecuteMsg::Governance {
             msg: GovernanceMsg::UpdateConfig {
                 psi_token: Some("new_psi_token".to_owned()),
+                min_staked_psi_amount: Some(Uint128::new(1)),
                 vesting: Some("new_vesting".to_owned()),
                 vesting_period: Some(100),
                 bond_control_var: Some(Decimal::from_str("3").unwrap()),
@@ -1770,6 +1837,7 @@ fn update_config() {
             owner: config.owner,
             governance: config.governance,
             psi_token: Addr::unchecked("new_psi_token"),
+            min_staked_psi_amount: Uint128::new(1),
             vesting: Addr::unchecked("new_vesting"),
             vesting_period: 100,
             bond_control_var: Decimal::from_str("3").unwrap(),
@@ -1943,6 +2011,7 @@ fn query_config() {
             owner: CREATOR.to_owned(),
             governance: GOVERNANCE.to_string(),
             psi_token: PSI_TOKEN.to_string(),
+            min_staked_psi_amount: Uint128::new(100),
             vesting: VESTING.to_string(),
             vesting_period: VESTING_PERIOD,
             bond_control_var: bcv(),

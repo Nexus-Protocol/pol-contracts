@@ -2,7 +2,8 @@ use astroport::asset::{AssetInfo, PairInfo};
 use astroport::factory::PairType;
 use cosmwasm_std::testing::{self, MockApi};
 use cosmwasm_std::{to_binary, Addr, Decimal, Env, MemoryStorage, OwnedDeps, Uint128};
-use services::pol::InstantiateMsg;
+use nexus_pol_services::pol::InstantiateMsg;
+use nexus_services::governance::StakerResponse;
 use std::str::FromStr;
 
 use crate::contract::instantiate;
@@ -95,6 +96,18 @@ pub fn add_pairs(deps: &mut Deps, pairs_info: &[PairInfo]) {
     }
 }
 
+pub fn set_staked_psi(deps: &mut Deps, amount: Uint128) {
+    deps.querier.wasm_query_smart_responses.insert(
+        GOVERNANCE.to_owned(),
+        to_binary(&StakerResponse {
+            balance: amount,
+            share: Uint128::zero(),
+            locked_balance: vec![],
+        })
+        .unwrap(),
+    );
+}
+
 pub fn instantiate_with_pairs(deps: &mut Deps, env: Env, pairs_info: Vec<PairInfo>) {
     let info = testing::mock_info(CREATOR, &[]);
 
@@ -111,6 +124,7 @@ pub fn instantiate_with_pairs(deps: &mut Deps, env: Env, pairs_info: Vec<PairInf
                 .map(|pi| pi.contract_addr.to_string())
                 .collect(),
             psi_token: PSI_TOKEN.to_owned(),
+            min_staked_psi_amount: Uint128::new(100),
             vesting: VESTING.to_owned(),
             vesting_period: VESTING_PERIOD,
             bond_control_var: bcv(),
@@ -123,4 +137,6 @@ pub fn instantiate_with_pairs(deps: &mut Deps, env: Env, pairs_info: Vec<PairInf
         },
     )
     .unwrap();
+
+    set_staked_psi(deps, Uint128::new(1000));
 }

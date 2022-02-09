@@ -12,11 +12,12 @@ use cw0::{must_pay, nonpayable, Expiration};
 use cw2::{get_contract_version, set_contract_version};
 use cw20::Cw20ReceiveMsg;
 use cw20_base::state::TokenInfo;
-use services::pol::{
+use nexus_pol_services::pol::{
     BuySimulationResponse, ConfigResponse, Cw20HookMsg, ExecuteMsg, GovernanceMsg, InstantiateMsg,
     MigrateMsg, QueryMsg,
 };
-use services::vesting::VestingSchedule;
+use nexus_pol_services::vesting::VestingSchedule;
+use nexus_services::governance::StakerResponse;
 use terra_cosmwasm::TerraQuerier;
 
 use crate::error::ContractError;
@@ -55,6 +56,7 @@ pub fn instantiate(
         owner: info.sender,
         governance: addr_validate_to_lower(deps.api, &msg.governance)?,
         psi_token: addr_validate_to_lower(deps.api, &msg.psi_token)?,
+        min_staked_psi_amount: msg.min_staked_psi_amount,
         vesting: addr_validate_to_lower(deps.api, &msg.vesting)?,
         vesting_period: msg.vesting_period,
         bond_control_var: msg.bond_control_var,
@@ -123,6 +125,7 @@ pub fn execute(
             match msg {
                 GovernanceMsg::UpdateConfig {
                     psi_token,
+                    min_staked_psi_amount,
                     vesting,
                     vesting_period,
                     bond_control_var,
@@ -135,6 +138,7 @@ pub fn execute(
                     deps,
                     config,
                     psi_token,
+                    min_staked_psi_amount,
                     vesting,
                     vesting_period,
                     bond_control_var,
@@ -157,6 +161,22 @@ pub fn execute(
     }
 }
 
+fn staked_enough_psi(
+    deps: Deps,
+    governance: &Addr,
+    addr: String,
+    required: Uint128,
+) -> Result<(), ContractError> {
+    let staker: StakerResponse = deps.querier.query_wasm_smart(
+        governance,
+        &nexus_services::governance::QueryMsg::Staker { address: addr },
+    )?;
+    if staker.balance < required {
+        return Err(ContractError::Unauthorized {});
+    }
+    Ok(())
+}
+
 fn receive_cw20(
     deps: DepsMut,
     env: Env,
@@ -166,6 +186,14 @@ fn receive_cw20(
     nonpayable(&info)?;
 
     let config = CONFIG.load(deps.storage)?;
+
+    staked_enough_psi(
+        deps.as_ref(),
+        &config.governance,
+        cw20_msg.sender.clone(),
+        config.min_staked_psi_amount,
+    )?;
+
     let state = STATE.load(deps.storage)?;
 
     let cw20_token = info.sender;
@@ -487,10 +515,12 @@ fn transfer_and_linear_vesting(
         }),
         SubMsg::new(WasmMsg::Execute {
             contract_addr: vesting.to_string(),
-            msg: to_binary(&services::vesting::ExecuteMsg::AddVestingSchedule {
-                addr: recipient,
-                schedule: vesting_schedule,
-            })?,
+            msg: to_binary(
+                &nexus_pol_services::vesting::ExecuteMsg::AddVestingSchedule {
+                    addr: recipient,
+                    schedule: vesting_schedule,
+                },
+            )?,
             funds: vec![],
         }),
     ])
@@ -529,10 +559,18 @@ fn execute_buy(
     info: MessageInfo,
     min_bonds_amount: Uint128,
 ) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+
+    staked_enough_psi(
+        deps.as_ref(),
+        &config.governance,
+        info.sender.to_string(),
+        config.min_staked_psi_amount,
+    )?;
+
     let payment_before_tax = must_pay(&info, UST)?;
     let payment = Uint128::from(get_taxed(deps.as_ref(), payment_before_tax.into())?);
 
-    let config = CONFIG.load(deps.storage)?;
     let state = STATE.load(deps.storage)?;
 
     let PairWithBalances {
@@ -977,6 +1015,7 @@ fn update_config(
     deps: DepsMut,
     mut config: Config,
     psi_token: Option<String>,
+    min_staked_psi_amount: Option<Uint128>,
     vesting: Option<String>,
     vesting_period: Option<u64>,
     bond_control_var: Option<Decimal>,
@@ -988,6 +1027,10 @@ fn update_config(
 ) -> Result<Response, ContractError> {
     if let Some(psi_token) = psi_token {
         config.psi_token = addr_validate_to_lower(deps.api, &psi_token)?;
+    }
+
+    if let Some(min_staked_psi_amount) = min_staked_psi_amount {
+        config.min_staked_psi_amount = min_staked_psi_amount;
     }
 
     if let Some(vesting) = vesting {
@@ -1100,6 +1143,7 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
         owner: config.owner.to_string(),
         governance: config.governance.to_string(),
         psi_token: config.psi_token.to_string(),
+        min_staked_psi_amount: config.min_staked_psi_amount,
         vesting: config.vesting.to_string(),
         vesting_period: config.vesting_period,
         bond_control_var: config.bond_control_var,

@@ -38,9 +38,10 @@ cw0 = "0.9.1"
 cw2 = "0.9.1"
 cw20 = "0.9.1"
 cw20-base = {version = "0.9.1", features = ["library"]}
+nexus-pol-services = {path = "../../packages/services", package = "services"}
+nexus-services = {git = "https://github.com/Nexus-Protocol/services-contracts", package = "services"}
 schemars = "0.8.8"
 serde = {version = "1.0.133", default-features = false, features = ["derive"]}
-services = {path = "../../packages/services"}
 terra-cosmwasm = {version = "2.2.0"}
 thiserror = {version = "1.0.30"}
 

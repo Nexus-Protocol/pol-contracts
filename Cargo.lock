@@ -459,7 +459,8 @@ dependencies = [
  "cw20-base",
  "schemars",
  "serde",
- "services",
+ "services 1.0.0",
+ "services 1.0.0 (git+https://github.com/Nexus-Protocol/services-contracts)",
  "terra-cosmwasm",
  "thiserror",
 ]
@@ -474,7 +475,7 @@ dependencies = [
  "cw20 0.8.1",
  "schemars",
  "serde",
- "services",
+ "services 1.0.0",
 ]
 
 [[package]]
@@ -622,6 +623,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "services"
+version = "1.0.0"
+source = "git+https://github.com/Nexus-Protocol/services-contracts#07bc2c2aa5cc2a39664cf2f899b324fe18a4d6a7"
+dependencies = [
+ "cosmwasm-std",
+ "cw20 0.8.1",
+ "schemars",
+ "serde",
+ "terraswap",
+]
+
+[[package]]
 name = "sha2"
 version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -685,6 +698,20 @@ dependencies = [
  "cosmwasm-std",
  "schemars",
  "serde",
+]
+
+[[package]]
+name = "terraswap"
+version = "2.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96f2c2a6371e9ddf2c942368e64645cc3e8fc2855da70c8c6bed238dcdd5522f"
+dependencies = [
+ "cosmwasm-std",
+ "cosmwasm-storage",
+ "cw20 0.8.1",
+ "schemars",
+ "serde",
+ "terra-cosmwasm",
 ]
 
 [[package]]

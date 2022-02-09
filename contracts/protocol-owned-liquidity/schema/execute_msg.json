@@ -163,6 +163,16 @@
                     }
                   ]
                 },
+                "min_staked_psi_amount": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/definitions/Uint128"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "psi_token": {
                   "type": [
                     "string",

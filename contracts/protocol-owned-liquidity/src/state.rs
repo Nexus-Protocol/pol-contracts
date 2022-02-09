@@ -10,6 +10,9 @@ pub struct Config {
     pub governance: Addr,
     pub psi_token: Addr,
 
+    // User can bond only if he is staking at least this amount of psi.
+    pub min_staked_psi_amount: Uint128,
+
     // All issued bonds have linear vesting.
     pub vesting: Addr,
     pub vesting_period: u64,

@@ -9,6 +9,9 @@ pub struct InstantiateMsg {
     pub governance: String,
     pub psi_token: String,
 
+    // User can bond only if he is staking at least this amount of psi.
+    pub min_staked_psi_amount: Uint128,
+
     // All issued bonds have linear vesting.
     pub vesting: String,
     pub vesting_period: u64,
@@ -57,6 +60,7 @@ pub enum ExecuteMsg {
 pub enum GovernanceMsg {
     UpdateConfig {
         psi_token: Option<String>,
+        min_staked_psi_amount: Option<Uint128>,
         vesting: Option<String>,
         vesting_period: Option<u64>,
         bond_control_var: Option<Decimal>,
@@ -100,6 +104,7 @@ pub struct ConfigResponse {
     pub owner: String,
     pub governance: String,
     pub psi_token: String,
+    pub min_staked_psi_amount: Uint128,
     pub vesting: String,
     pub vesting_period: u64,
     pub bond_control_var: Decimal,
