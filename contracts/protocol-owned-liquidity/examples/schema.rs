@@ -5,7 +5,7 @@ use cosmwasm_schema::{export_schema, remove_schemas, schema_for};
 
 use nexus_pol_services::pol::{
     BuySimulationResponse, ConfigResponse, Cw20HookMsg, ExecuteMsg, InstantiateMsg, MigrateMsg,
-    QueryMsg,
+    PhaseResponse, QueryMsg,
 };
 
 fn main() {
@@ -19,6 +19,7 @@ fn main() {
     export_schema(&schema_for!(QueryMsg), &out_dir);
     export_schema(&schema_for!(Cw20HookMsg), &out_dir);
     export_schema(&schema_for!(ConfigResponse), &out_dir);
+    export_schema(&schema_for!(PhaseResponse), &out_dir);
     export_schema(&schema_for!(BuySimulationResponse), &out_dir);
     export_schema(&schema_for!(MigrateMsg), &out_dir);
 }

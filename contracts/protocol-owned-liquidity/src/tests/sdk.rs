@@ -2,11 +2,11 @@ use astroport::asset::{AssetInfo, PairInfo};
 use astroport::factory::PairType;
 use cosmwasm_std::testing::{self, MockApi};
 use cosmwasm_std::{to_binary, Addr, Decimal, Env, MemoryStorage, OwnedDeps, Uint128};
-use nexus_pol_services::pol::InstantiateMsg;
-use nexus_services::governance::StakerResponse;
+use nexus_pol_services::pol::{ExecuteMsg, GovernanceMsg, InstantiateMsg};
 use std::str::FromStr;
 
-use crate::contract::instantiate;
+use crate::contract::{execute, instantiate};
+use crate::state::Phase;
 use crate::tests::mock_querier::*;
 
 pub const GOVERNANCE: &str = "governance";
@@ -16,22 +16,29 @@ pub const VESTING: &str = "vesting";
 pub const COMMUNITY_POOL: &str = "community_pool";
 pub const ASTRO_GENERATOR: &str = "astro_generator";
 pub const ASTRO_TOKEN: &str = "astro_token";
+pub const UTILITY_TOKEN: &str = "utility_token";
 
 pub const CREATOR: &str = "creator";
 pub const INVESTOR: &str = "investor";
 
 pub const VESTING_PERIOD: u64 = 5 * 24 * 3600;
 
-pub fn bcv() -> Decimal {
-    Decimal::from_ratio(Uint128::new(7), Uint128::new(2))
-}
-
-pub fn max_bonds_amount() -> Decimal {
-    Decimal::from_str("0.0001").unwrap()
-}
-
 pub fn min_bonds_amount() -> Uint128 {
     Uint128::new(1_000)
+}
+
+pub fn bond_cost() -> Decimal {
+    Decimal::from_str("0.5").unwrap()
+}
+
+pub fn default_phase(env: &Env) -> Phase {
+    Phase {
+        max_discount: Decimal::from_str("0.5").unwrap(),
+        psi_amount_total: Uint128::new(36_000_000_000_000),
+        psi_amount_start: Uint128::new(8_333_333_333),
+        start_time: env.block.time.seconds(),
+        end_time: env.block.time.plus_seconds(30 * 24 * 3600).seconds(),
+    }
 }
 
 pub fn init() -> (OwnedDeps<MemoryStorage, MockApi, WasmMockQuerier>, Env) {
@@ -96,47 +103,50 @@ pub fn add_pairs(deps: &mut Deps, pairs_info: &[PairInfo]) {
     }
 }
 
-pub fn set_staked_psi(deps: &mut Deps, amount: Uint128) {
-    deps.querier.wasm_query_smart_responses.insert(
-        GOVERNANCE.to_owned(),
-        to_binary(&StakerResponse {
-            balance: amount,
-            share: Uint128::zero(),
-            locked_balance: vec![],
-        })
-        .unwrap(),
-    );
-}
-
-pub fn instantiate_with_pairs(deps: &mut Deps, env: Env, pairs_info: Vec<PairInfo>) {
+pub fn instantiate_properly(deps: &mut Deps, env: Env, pairs: Vec<PairInfo>, phase: Option<Phase>) {
     let info = testing::mock_info(CREATOR, &[]);
 
-    add_pairs(deps, &pairs_info);
+    add_pairs(deps, &pairs);
 
     instantiate(
         deps.as_mut(),
-        env,
+        env.clone(),
         info,
         InstantiateMsg {
             governance: GOVERNANCE.to_owned(),
-            pairs: pairs_info
+            pairs: pairs
                 .into_iter()
                 .map(|pi| pi.contract_addr.to_string())
                 .collect(),
             psi_token: PSI_TOKEN.to_owned(),
-            min_staked_psi_amount: Uint128::new(100),
             vesting: VESTING.to_owned(),
             vesting_period: VESTING_PERIOD,
-            bond_control_var: bcv(),
-            excluded_psi: vec![GOVERNANCE.to_owned(), VESTING.to_owned()],
-            max_bonds_amount: max_bonds_amount(),
             community_pool: COMMUNITY_POOL.to_owned(),
             autostake_lp_tokens: true,
             astro_generator: ASTRO_GENERATOR.to_owned(),
             astro_token: ASTRO_TOKEN.to_owned(),
+            utility_token: Some(UTILITY_TOKEN.to_owned()),
+            bond_cost_in_utility_tokens: Decimal::from_str("0.5").unwrap(),
         },
     )
     .unwrap();
 
-    set_staked_psi(deps, Uint128::new(1000));
+    if let Some(phase) = phase {
+        let info = testing::mock_info(GOVERNANCE, &[]);
+        execute(
+            deps.as_mut(),
+            env,
+            info,
+            ExecuteMsg::Governance {
+                msg: GovernanceMsg::Phase {
+                    max_discount: phase.max_discount,
+                    psi_amount_total: phase.psi_amount_total,
+                    psi_amount_start: phase.psi_amount_start,
+                    start_time: phase.start_time,
+                    end_time: phase.end_time,
+                },
+            },
+        )
+        .unwrap();
+    }
 }

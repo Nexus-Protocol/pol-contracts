@@ -11,6 +11,9 @@ pub enum ContractError {
     #[error("{0}")]
     Payment(#[from] PaymentError),
 
+    #[error("invalid phase")]
+    InvalidPhase {},
+
     #[error("invalid pair: {addr}, reason: {source}")]
     InvalidPair { addr: String, source: StdError },
 
@@ -23,20 +26,30 @@ pub enum ContractError {
     #[error("unauthorized")]
     Unauthorized {},
 
+    #[error("phase is started at {start_time} epoch time, but {cur_time} now")]
+    PhaseNotStarted { start_time: u64, cur_time: u64 },
+
     #[error("zero balance of {token} in pair {addr}")]
     ZeroBalanceInPair { token: String, addr: String },
 
-    #[error("bonds amount {value} exceeds limit {maximum}")]
-    BondsAmountTooLarge { value: Uint128, maximum: Uint128 },
+    #[error("not enough {name} tokens: {value}, but {required} required")]
+    NotEnoughTokens {
+        name: String,
+        value: Uint128,
+        required: Uint128,
+    },
+
+    #[error("no bonds are available")]
+    NoBondsAvailable {},
 
     #[error("bonds amount {value} is less than expected {minimum}")]
     BondsAmountTooSmall { value: Uint128, minimum: Uint128 },
 
+    #[error("bonds amount {value} is too large (max: {maximum})")]
+    BondsAmountTooLarge { value: Uint128, maximum: Uint128 },
+
     #[error("payment too small")]
     PaymentTooSmall {},
-
-    #[error("not enough psi tokens: {value}, but {required} required")]
-    NotEnoughPsiTokens { value: Uint128, required: Uint128 },
 }
 
 impl From<ContractError> for StdError {

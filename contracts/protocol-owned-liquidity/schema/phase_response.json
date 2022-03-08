@@ -1,21 +1,33 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "BuySimulationResponse",
+  "title": "PhaseResponse",
   "type": "object",
   "required": [
-    "bonds",
-    "discount",
-    "utility_tokens"
+    "end_time",
+    "max_discount",
+    "psi_amount_start",
+    "psi_amount_total",
+    "start_time"
   ],
   "properties": {
-    "bonds": {
-      "$ref": "#/definitions/Uint128"
+    "end_time": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
     },
-    "discount": {
+    "max_discount": {
       "$ref": "#/definitions/Decimal"
     },
-    "utility_tokens": {
+    "psi_amount_start": {
       "$ref": "#/definitions/Uint128"
+    },
+    "psi_amount_total": {
+      "$ref": "#/definitions/Uint128"
+    },
+    "start_time": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
     }
   },
   "definitions": {

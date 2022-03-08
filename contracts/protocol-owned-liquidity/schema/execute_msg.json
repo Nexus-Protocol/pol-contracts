@@ -113,6 +113,46 @@
         {
           "type": "object",
           "required": [
+            "phase"
+          ],
+          "properties": {
+            "phase": {
+              "type": "object",
+              "required": [
+                "end_time",
+                "max_discount",
+                "psi_amount_start",
+                "psi_amount_total",
+                "start_time"
+              ],
+              "properties": {
+                "end_time": {
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0.0
+                },
+                "max_discount": {
+                  "$ref": "#/definitions/Decimal"
+                },
+                "psi_amount_start": {
+                  "$ref": "#/definitions/Uint128"
+                },
+                "psi_amount_total": {
+                  "$ref": "#/definitions/Uint128"
+                },
+                "start_time": {
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0.0
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
             "update_config"
           ],
           "properties": {
@@ -137,7 +177,7 @@
                     "null"
                   ]
                 },
-                "bond_control_var": {
+                "bond_cost_in_utility_tokens": {
                   "anyOf": [
                     {
                       "$ref": "#/definitions/Decimal"
@@ -153,27 +193,13 @@
                     "null"
                   ]
                 },
-                "max_bonds_amount": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/definitions/Decimal"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
-                "min_staked_psi_amount": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/definitions/Uint128"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                },
                 "psi_token": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "utility_token": {
                   "type": [
                     "string",
                     "null"
@@ -205,36 +231,6 @@
           ],
           "properties": {
             "update_pairs": {
-              "type": "object",
-              "required": [
-                "add",
-                "remove"
-              ],
-              "properties": {
-                "add": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                },
-                "remove": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                }
-              }
-            }
-          },
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "required": [
-            "update_excluded_psi"
-          ],
-          "properties": {
-            "update_excluded_psi": {
               "type": "object",
               "required": [
                 "add",

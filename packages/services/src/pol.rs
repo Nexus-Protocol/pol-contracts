@@ -9,21 +9,9 @@ pub struct InstantiateMsg {
     pub governance: String,
     pub psi_token: String,
 
-    // User can bond only if he is staking at least this amount of psi.
-    pub min_staked_psi_amount: Uint128,
-
     // All issued bonds have linear vesting.
     pub vesting: String,
     pub vesting_period: u64,
-
-    // BCV controls how fast bond`s price increases.
-    pub bond_control_var: Decimal,
-
-    // Tokens are out of circulation.
-    pub excluded_psi: Vec<String>,
-
-    // User cant buy more than this share of PSI token supply at a time.
-    pub max_bonds_amount: Decimal,
 
     // ASTRO & PSI rewards are transfered to.
     pub community_pool: String,
@@ -36,6 +24,10 @@ pub struct InstantiateMsg {
 
     // Pairs are allowed to provide liquidity in.
     pub pairs: Vec<String>,
+
+    // If set, user should use this token to be allowed to buy bonds.
+    pub utility_token: Option<String>,
+    pub bond_cost_in_utility_tokens: Decimal,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -58,23 +50,26 @@ pub enum ExecuteMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum GovernanceMsg {
+    // Start a new phase of bonding.
+    Phase {
+        max_discount: Decimal,
+        psi_amount_total: Uint128,
+        psi_amount_start: Uint128,
+        start_time: u64,
+        end_time: u64,
+    },
     UpdateConfig {
         psi_token: Option<String>,
-        min_staked_psi_amount: Option<Uint128>,
         vesting: Option<String>,
         vesting_period: Option<u64>,
-        bond_control_var: Option<Decimal>,
-        max_bonds_amount: Option<Decimal>,
         community_pool: Option<String>,
         autostake_lp_tokens: Option<bool>,
         astro_generator: Option<String>,
         astro_token: Option<String>,
+        utility_token: Option<Option<String>>,
+        bond_cost_in_utility_tokens: Option<Decimal>,
     },
     UpdatePairs {
-        add: Vec<String>,
-        remove: Vec<String>,
-    },
-    UpdateExcludedPsi {
         add: Vec<String>,
         remove: Vec<String>,
     },
@@ -94,9 +89,8 @@ pub enum Cw20HookMsg {
 #[serde(rename_all = "snake_case")]
 pub enum QueryMsg {
     Config {},
-    Version {},
+    Phase {},
     BuySimulation { asset: Asset },
-    PsiCirculatingSupply {},
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -104,24 +98,31 @@ pub struct ConfigResponse {
     pub owner: String,
     pub governance: String,
     pub psi_token: String,
-    pub min_staked_psi_amount: Uint128,
     pub vesting: String,
     pub vesting_period: u64,
-    pub bond_control_var: Decimal,
-    pub max_bonds_amount: Decimal,
-    pub excluded_psi: Vec<String>,
     pub pairs: Vec<String>,
     pub community_pool: String,
     pub autostake_lp_tokens: bool,
     pub astro_generator: String,
     pub astro_token: String,
+    pub utility_token: Option<String>,
+    pub bond_cost_in_utility_tokens: Decimal,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct PhaseResponse {
+    pub max_discount: Decimal,
+    pub psi_amount_total: Uint128,
+    pub psi_amount_start: Uint128,
+    pub start_time: u64,
+    pub end_time: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct BuySimulationResponse {
     pub bonds: Uint128,
-    pub bond_price: Decimal,
-    pub psi_price: Decimal,
+    pub discount: Decimal,
+    pub utility_tokens: Uint128,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

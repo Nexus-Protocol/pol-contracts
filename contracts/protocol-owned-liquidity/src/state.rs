@@ -1,5 +1,5 @@
 use astroport::asset::{AssetInfo, PairInfo};
-use cosmwasm_std::{Addr, Attribute, Decimal, Order, StdResult, Storage, Uint128};
+use cosmwasm_std::{Addr, Attribute, Decimal, Env, Order, StdError, StdResult, Storage, Uint128};
 use cw_storage_plus::{Item, Map};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -10,18 +10,9 @@ pub struct Config {
     pub governance: Addr,
     pub psi_token: Addr,
 
-    // User can bond only if he is staking at least this amount of psi.
-    pub min_staked_psi_amount: Uint128,
-
     // All issued bonds have linear vesting.
     pub vesting: Addr,
     pub vesting_period: u64,
-
-    // BCV controls how fast bond`s price increases.
-    pub bond_control_var: Decimal,
-
-    // User cant buy more than this share of PSI token supply at a time.
-    pub max_bonds_amount: Decimal,
 
     // Whether to stake LP tokens to Astroport or not.
     pub autostake_lp_tokens: bool,
@@ -31,6 +22,10 @@ pub struct Config {
 
     pub astro_generator: Addr,
     pub astro_token: Addr,
+
+    // If set, user should use this token to be allowed to buy bonds.
+    pub utility_token: Option<Addr>,
+    pub bond_cost_in_utility_tokens: Decimal,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -40,8 +35,17 @@ pub struct GovernanceUpdateState {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Phase {
+    pub max_discount: Decimal,
+    pub psi_amount_total: Uint128,
+    pub psi_amount_start: Uint128,
+    pub start_time: u64,
+    pub end_time: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct State {
-    pub bonds_issued: Uint128,
+    pub psi_amount_sold: Uint128,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -79,10 +83,34 @@ pub const CONFIG: Item<Config> = Item::new("config");
 
 pub const GOVERNANCE_UPDATE: Item<GovernanceUpdateState> = Item::new("gov_update");
 
+pub const PHASE: Item<Phase> = Item::new("phase");
+
+pub fn phase(store: &dyn Storage, env: Env) -> StdResult<Phase> {
+    match PHASE.may_load(store)? {
+        Some(phase) => {
+            let cur_time = env.block.time.seconds();
+            if cur_time < phase.start_time {
+                Err(StdError::generic_err(format!(
+                    "phase starts at {}, but {} now",
+                    phase.start_time, cur_time
+                )))
+            } else if cur_time > phase.end_time {
+                Err(StdError::generic_err(format!(
+                    "phase finished at {}, but {} now",
+                    phase.end_time, cur_time
+                )))
+            } else {
+                Ok(phase)
+            }
+        }
+        None => Err(StdError::generic_err("phase is not set")),
+    }
+}
+
 pub const STATE: Item<State> = Item::new("state");
 
-pub fn save_state(store: &mut dyn Storage, bonds_issued: Uint128) -> StdResult<()> {
-    STATE.save(store, &State { bonds_issued })
+pub fn save_state(store: &mut dyn Storage, psi_amount_sold: Uint128) -> StdResult<()> {
+    STATE.save(store, &State { psi_amount_sold })
 }
 
 // Pairs are allowed to provide liquidity in.
@@ -111,24 +139,6 @@ pub fn pairs(store: &dyn Storage) -> Vec<PairInfo> {
         .range(store, None, None, Order::Ascending)
         .flatten()
         .map(|v| v.1)
-        .collect()
-}
-
-// Tokens are out of circulation.
-const EXCLUDED_PSI: Map<&Addr, ()> = Map::new("excluded_psi");
-
-pub fn save_excluded_psi(store: &mut dyn Storage, addr: &Addr) -> StdResult<()> {
-    EXCLUDED_PSI.save(store, addr, &())
-}
-
-pub fn remove_excluded_psi(store: &mut dyn Storage, addr: &Addr) {
-    EXCLUDED_PSI.remove(store, addr);
-}
-
-pub fn excluded_psi(store: &dyn Storage) -> Vec<Addr> {
-    EXCLUDED_PSI
-        .keys(store, None, None, Order::Ascending)
-        .map(|addr| Addr::unchecked(String::from_utf8_lossy(&addr)))
         .collect()
 }
 

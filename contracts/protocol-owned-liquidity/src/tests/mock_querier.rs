@@ -183,10 +183,6 @@ impl WasmMockQuerier {
         }
     }
 
-    pub fn set_total_supply(&mut self, amount: Uint128) {
-        self.token_total_supply = amount;
-    }
-
     pub fn set_token_balances(&mut self, balances: &[(&str, &[(&str, &Uint128)])]) {
         self.token_balances = balances_to_map(balances);
     }
