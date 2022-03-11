@@ -1119,7 +1119,7 @@ fn update_config(
     autostake_lp_tokens: Option<bool>,
     astro_generator: Option<String>,
     astro_token: Option<String>,
-    utility_token: Option<Option<String>>,
+    utility_token: Option<String>,
     bond_cost_in_utility_tokens: Option<Decimal>,
 ) -> Result<Response, ContractError> {
     if let Some(psi_token) = psi_token {
@@ -1151,9 +1151,11 @@ fn update_config(
     }
 
     if let Some(utility_token) = utility_token {
-        config.utility_token = utility_token
-            .map(|addr| addr_validate_to_lower(deps.api, &addr))
-            .transpose()?;
+        config.utility_token = if utility_token.is_empty() {
+            None
+        } else {
+            Some(addr_validate_to_lower(deps.api, &utility_token)?)
+        };
     }
 
     if let Some(bond_cost_in_utility_tokens) = bond_cost_in_utility_tokens {

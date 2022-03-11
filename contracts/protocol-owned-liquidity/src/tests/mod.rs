@@ -1881,7 +1881,7 @@ fn update_config() {
                 autostake_lp_tokens: Some(false),
                 astro_generator: Some("new_astro_generator".to_owned()),
                 astro_token: Some("new_astro_token".to_owned()),
-                utility_token: Some(Some("new_utility_token".to_owned())),
+                utility_token: Some("".to_owned()),
                 bond_cost_in_utility_tokens: Some(Decimal::one()),
             },
         },
@@ -1903,7 +1903,7 @@ fn update_config() {
             autostake_lp_tokens: false,
             astro_generator: Addr::unchecked("new_astro_generator"),
             astro_token: Addr::unchecked("new_astro_token"),
-            utility_token: Some(Addr::unchecked("new_utility_token")),
+            utility_token: None,
             bond_cost_in_utility_tokens: Decimal::one(),
         },
         new_config

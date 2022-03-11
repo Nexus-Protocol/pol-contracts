@@ -66,7 +66,7 @@ pub enum GovernanceMsg {
         autostake_lp_tokens: Option<bool>,
         astro_generator: Option<String>,
         astro_token: Option<String>,
-        utility_token: Option<Option<String>>,
+        utility_token: Option<String>,
         bond_cost_in_utility_tokens: Option<Decimal>,
     },
     UpdatePairs {
