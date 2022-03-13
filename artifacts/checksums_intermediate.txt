@@ -1,2 +1,2 @@
-86ce62d6c44306cd35d104cdbf5868a6a2272366c1d3e09103391676b689b8fe  target/wasm32-unknown-unknown/release/nexus_pol.wasm
+7b0949d13ab300d353f23030d1347a1b0e8a413cf38a7b04d188e76c4e108a9b  target/wasm32-unknown-unknown/release/nexus_pol.wasm
 d13b40555df6c858b3ce9b65de7de7744042a29f83132edbe0e0bb58b91828a6  target/wasm32-unknown-unknown/release/nexus_pol_vesting.wasm
