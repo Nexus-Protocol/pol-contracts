@@ -28,6 +28,18 @@ pub struct InstantiateMsg {
     // If set, user should use this token to be allowed to buy bonds.
     pub utility_token: Option<String>,
     pub bond_cost_in_utility_tokens: Decimal,
+
+    pub initial_phase: Option<Phase>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct Phase {
+    pub max_discount: Decimal,
+    pub psi_amount_total: Uint128,
+    pub psi_amount_start: Uint128,
+    pub start_time: u64,
+    pub end_time: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -52,11 +64,7 @@ pub enum ExecuteMsg {
 pub enum GovernanceMsg {
     // Start a new phase of bonding.
     Phase {
-        max_discount: Decimal,
-        psi_amount_total: Uint128,
-        psi_amount_start: Uint128,
-        start_time: u64,
-        end_time: u64,
+        phase: Phase,
     },
     UpdateConfig {
         psi_token: Option<String>,
@@ -111,11 +119,7 @@ pub struct ConfigResponse {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct PhaseResponse {
-    pub max_discount: Decimal,
-    pub psi_amount_total: Uint128,
-    pub psi_amount_start: Uint128,
-    pub start_time: u64,
-    pub end_time: u64,
+    pub phase: Phase,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

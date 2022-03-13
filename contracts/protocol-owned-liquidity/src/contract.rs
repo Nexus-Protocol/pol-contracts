@@ -13,14 +13,14 @@ use cw2::{get_contract_version, set_contract_version};
 use cw20::{AllowanceResponse, Cw20ReceiveMsg};
 use nexus_pol_services::pol::{
     BuySimulationResponse, ConfigResponse, Cw20HookMsg, ExecuteMsg, GovernanceMsg, InstantiateMsg,
-    MigrateMsg, PhaseResponse, QueryMsg,
+    MigrateMsg, Phase, PhaseResponse, QueryMsg,
 };
 use nexus_pol_services::vesting::VestingSchedule;
 use terra_cosmwasm::TerraQuerier;
 
 use crate::error::ContractError;
 use crate::state::{
-    pair, pairs, phase, remove_pair, save_pair, save_state, Config, GovernanceUpdateState, Phase,
+    pair, pairs, phase, remove_pair, save_pair, save_state, Config, GovernanceUpdateState,
     ReplyContext, TokenBalance, CONFIG, GOVERNANCE_UPDATE, PHASE, REPLY_CONTEXT, STATE,
 };
 
@@ -33,7 +33,7 @@ pub const CLAIM_REWARDS_REPLY_ID: u64 = 2;
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
     deps: DepsMut,
-    _env: Env,
+    env: Env,
     info: MessageInfo,
     msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
@@ -62,6 +62,11 @@ pub fn instantiate(
     CONFIG.save(deps.storage, &config)?;
 
     save_state(deps.storage, Uint128::zero())?;
+
+    if let Some(phase) = msg.initial_phase {
+        phase_validate(&phase, env.block.time.seconds())?;
+        PHASE.save(deps.storage, &phase.into())?;
+    }
 
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
 
@@ -116,21 +121,7 @@ pub fn execute(
             }
 
             match msg {
-                GovernanceMsg::Phase {
-                    max_discount,
-                    psi_amount_total,
-                    psi_amount_start,
-                    start_time,
-                    end_time,
-                } => execute_phase(
-                    deps,
-                    env,
-                    max_discount,
-                    psi_amount_total,
-                    psi_amount_start,
-                    start_time,
-                    end_time,
-                ),
+                GovernanceMsg::Phase { phase } => execute_phase(deps, env, phase),
                 GovernanceMsg::UpdateConfig {
                     psi_token,
                     vesting,
@@ -164,33 +155,20 @@ pub fn execute(
     }
 }
 
-fn execute_phase(
-    deps: DepsMut,
-    env: Env,
-    max_discount: Decimal,
-    psi_amount_total: Uint128,
-    psi_amount_start: Uint128,
-    start_time: u64,
-    end_time: u64,
-) -> Result<Response, ContractError> {
-    if psi_amount_start > psi_amount_total
-        || max_discount >= Decimal::one()
-        || start_time >= end_time
-        || env.block.time.seconds() >= end_time
+fn phase_validate(phase: &Phase, cur_time: u64) -> Result<(), ContractError> {
+    if phase.psi_amount_start > phase.psi_amount_total
+        || phase.max_discount >= Decimal::one()
+        || phase.start_time >= phase.end_time
+        || cur_time >= phase.end_time
     {
         return Err(ContractError::InvalidPhase {});
     }
+    Ok(())
+}
 
-    PHASE.save(
-        deps.storage,
-        &Phase {
-            max_discount,
-            psi_amount_total,
-            psi_amount_start,
-            start_time,
-            end_time,
-        },
-    )?;
+fn execute_phase(deps: DepsMut, env: Env, phase: Phase) -> Result<Response, ContractError> {
+    phase_validate(&phase, env.block.time.seconds())?;
+    PHASE.save(deps.storage, &phase.into())?;
 
     save_state(deps.storage, Uint128::zero())?;
 
@@ -810,144 +788,6 @@ fn calculate_bonds_inner(
     Ok((discount, bonds_amount))
 }
 
-#[cfg(test)]
-mod tests {
-    use std::str::FromStr;
-
-    use cosmwasm_bignumber::{Decimal256, Uint256};
-    use cosmwasm_std::Uint128;
-
-    use crate::error::ContractError;
-
-    use super::calculate_bonds_inner;
-
-    #[test]
-    fn calculation_fails_when_no_more_bonds_available() {
-        let asset_cost_in_psi = Uint256::from(100u64);
-        let psi_total = Uint256::from(36_000_000u64);
-        let max_discount = Decimal256::from_str("0.5").unwrap();
-        let psi_start = Decimal256::from_str("0.15").unwrap() / max_discount * psi_total;
-        let psi_sold = psi_total + Uint256::one();
-        let start_time = 1_000;
-        let end_time = 5_000;
-        let cur_time = end_time;
-        let min_bonds_amount = Uint256::zero();
-
-        let r = calculate_bonds_inner(
-            asset_cost_in_psi,
-            psi_total,
-            psi_start,
-            psi_sold,
-            max_discount,
-            start_time,
-            cur_time,
-            end_time,
-            min_bonds_amount,
-        );
-
-        assert_eq!(Err(ContractError::NoBondsAvailable {}), r);
-    }
-
-    #[test]
-    fn calculation_fails_when_trying_to_buy_too_much_bonds() {
-        let asset_cost_in_psi = Uint256::from(1_000_000_000u64);
-        let psi_total = Uint256::from(36_000_000u64);
-        let max_discount = Decimal256::from_str("0.5").unwrap();
-        let psi_start = Decimal256::from_str("0.15").unwrap() / max_discount * psi_total;
-        let psi_sold = psi_start / Decimal256::from_str("3").unwrap();
-        let start_time = 1_000;
-        let end_time = 5_000;
-        let cur_time = 2_500;
-        let min_bonds_amount = Uint256::zero();
-
-        let r = calculate_bonds_inner(
-            asset_cost_in_psi,
-            psi_total,
-            psi_start,
-            psi_sold,
-            max_discount,
-            start_time,
-            cur_time,
-            end_time,
-            min_bonds_amount,
-        );
-
-        assert_eq!(
-            Err(ContractError::BondsAmountTooLarge {
-                value: Uint128::new(328_138_751),
-                maximum: Uint128::new(33_300_000)
-            }),
-            r
-        );
-    }
-
-    #[test]
-    fn calculation_fails_when_get_less_bonds_than_expected() {
-        let asset_cost_in_psi = Uint256::from(1_000u64);
-        let psi_total = Uint256::from(36_000_000u64);
-        let max_discount = Decimal256::from_str("0.5").unwrap();
-        let psi_start = Decimal256::from_str("0.15").unwrap() / max_discount * psi_total;
-        let psi_sold = psi_start / Decimal256::from_str("3").unwrap();
-        let start_time = 1_000;
-        let end_time = 5_000;
-        let cur_time = 2_500;
-        let min_bonds_amount = Uint256::from(9_000_000_000u64);
-
-        let r = calculate_bonds_inner(
-            asset_cost_in_psi,
-            psi_total,
-            psi_start,
-            psi_sold,
-            max_discount,
-            start_time,
-            cur_time,
-            end_time,
-            min_bonds_amount,
-        );
-
-        assert_eq!(
-            Err(ContractError::BondsAmountTooSmall {
-                value: Uint128::new(1_300),
-                minimum: Uint128::new(9_000_000_000),
-            }),
-            r
-        );
-    }
-
-    #[test]
-    fn calculation() {
-        let asset_cost_in_psi = Uint256::from(100_000_000u64);
-        let psi_total = Uint256::from(36_000_000_000_000u64);
-        let max_discount = Decimal256::from_str("0.5").unwrap();
-        let psi_start = Decimal256::from_str("0.15").unwrap() / max_discount * psi_total;
-        let psi_sold = Uint256::zero();
-        let start_time = 1_000;
-        let cur_time = 1_000;
-        let end_time = 5_000;
-        let min_bonds_amount = Uint256::zero();
-
-        let r = calculate_bonds_inner(
-            asset_cost_in_psi,
-            psi_total,
-            psi_start,
-            psi_sold,
-            max_discount,
-            start_time,
-            cur_time,
-            end_time,
-            min_bonds_amount,
-        );
-
-        assert_eq!(
-            Ok((
-                Decimal256::from_str("0.149999183007326388").unwrap(),
-                Uint256::from(117_646_945u64)
-            )),
-            r
-        );
-    }
-}
-
 fn check_psi_balance(current: Uint128, required: Uint128) -> Result<(), ContractError> {
     if current < required {
         return Err(ContractError::NotEnoughTokens {
@@ -1235,11 +1075,7 @@ fn query_phase(deps: Deps) -> StdResult<PhaseResponse> {
     let phase = PHASE.load(deps.storage)?;
 
     Ok(PhaseResponse {
-        max_discount: phase.max_discount,
-        psi_amount_total: phase.psi_amount_total,
-        psi_amount_start: phase.psi_amount_start,
-        start_time: phase.start_time,
-        end_time: phase.end_time,
+        phase: phase.into(),
     })
 }
 
@@ -1346,4 +1182,142 @@ pub fn migrate(deps: DepsMut, _env: Env, _msg: MigrateMsg) -> Result<Response, C
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
 
     Ok(Response::new())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use cosmwasm_bignumber::{Decimal256, Uint256};
+    use cosmwasm_std::Uint128;
+
+    use crate::error::ContractError;
+
+    use super::calculate_bonds_inner;
+
+    #[test]
+    fn calculation_fails_when_no_more_bonds_available() {
+        let asset_cost_in_psi = Uint256::from(100u64);
+        let psi_total = Uint256::from(36_000_000u64);
+        let max_discount = Decimal256::from_str("0.5").unwrap();
+        let psi_start = Decimal256::from_str("0.15").unwrap() / max_discount * psi_total;
+        let psi_sold = psi_total + Uint256::one();
+        let start_time = 1_000;
+        let end_time = 5_000;
+        let cur_time = end_time;
+        let min_bonds_amount = Uint256::zero();
+
+        let r = calculate_bonds_inner(
+            asset_cost_in_psi,
+            psi_total,
+            psi_start,
+            psi_sold,
+            max_discount,
+            start_time,
+            cur_time,
+            end_time,
+            min_bonds_amount,
+        );
+
+        assert_eq!(Err(ContractError::NoBondsAvailable {}), r);
+    }
+
+    #[test]
+    fn calculation_fails_when_trying_to_buy_too_much_bonds() {
+        let asset_cost_in_psi = Uint256::from(1_000_000_000u64);
+        let psi_total = Uint256::from(36_000_000u64);
+        let max_discount = Decimal256::from_str("0.5").unwrap();
+        let psi_start = Decimal256::from_str("0.15").unwrap() / max_discount * psi_total;
+        let psi_sold = psi_start / Decimal256::from_str("3").unwrap();
+        let start_time = 1_000;
+        let end_time = 5_000;
+        let cur_time = 2_500;
+        let min_bonds_amount = Uint256::zero();
+
+        let r = calculate_bonds_inner(
+            asset_cost_in_psi,
+            psi_total,
+            psi_start,
+            psi_sold,
+            max_discount,
+            start_time,
+            cur_time,
+            end_time,
+            min_bonds_amount,
+        );
+
+        assert_eq!(
+            Err(ContractError::BondsAmountTooLarge {
+                value: Uint128::new(328_138_751),
+                maximum: Uint128::new(33_300_000)
+            }),
+            r
+        );
+    }
+
+    #[test]
+    fn calculation_fails_when_get_less_bonds_than_expected() {
+        let asset_cost_in_psi = Uint256::from(1_000u64);
+        let psi_total = Uint256::from(36_000_000u64);
+        let max_discount = Decimal256::from_str("0.5").unwrap();
+        let psi_start = Decimal256::from_str("0.15").unwrap() / max_discount * psi_total;
+        let psi_sold = psi_start / Decimal256::from_str("3").unwrap();
+        let start_time = 1_000;
+        let end_time = 5_000;
+        let cur_time = 2_500;
+        let min_bonds_amount = Uint256::from(9_000_000_000u64);
+
+        let r = calculate_bonds_inner(
+            asset_cost_in_psi,
+            psi_total,
+            psi_start,
+            psi_sold,
+            max_discount,
+            start_time,
+            cur_time,
+            end_time,
+            min_bonds_amount,
+        );
+
+        assert_eq!(
+            Err(ContractError::BondsAmountTooSmall {
+                value: Uint128::new(1_300),
+                minimum: Uint128::new(9_000_000_000),
+            }),
+            r
+        );
+    }
+
+    #[test]
+    fn calculation() {
+        let asset_cost_in_psi = Uint256::from(100_000_000u64);
+        let psi_total = Uint256::from(36_000_000_000_000u64);
+        let max_discount = Decimal256::from_str("0.5").unwrap();
+        let psi_start = Decimal256::from_str("0.15").unwrap() / max_discount * psi_total;
+        let psi_sold = Uint256::zero();
+        let start_time = 1_000;
+        let cur_time = 1_000;
+        let end_time = 5_000;
+        let min_bonds_amount = Uint256::zero();
+
+        let r = calculate_bonds_inner(
+            asset_cost_in_psi,
+            psi_total,
+            psi_start,
+            psi_sold,
+            max_discount,
+            start_time,
+            cur_time,
+            end_time,
+            min_bonds_amount,
+        );
+
+        assert_eq!(
+            Ok((
+                Decimal256::from_str("0.149999183007326388").unwrap(),
+                Uint256::from(117_646_945u64)
+            )),
+            r
+        );
+    }
 }

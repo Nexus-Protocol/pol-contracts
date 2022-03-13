@@ -7,7 +7,7 @@ use cosmwasm_std::{testing, to_binary};
 use cw0::{Expiration, PaymentError};
 use cw20::{AllowanceResponse, Cw20ReceiveMsg};
 use nexus_pol_services::pol::{
-    BuySimulationResponse, ConfigResponse, ExecuteMsg, GovernanceMsg, InstantiateMsg,
+    BuySimulationResponse, ConfigResponse, ExecuteMsg, GovernanceMsg, InstantiateMsg, Phase,
     PhaseResponse, QueryMsg,
 };
 use nexus_pol_services::vesting::VestingSchedule;
@@ -47,6 +47,7 @@ fn proper_instantiation() {
             astro_token: ASTRO_TOKEN.to_owned(),
             utility_token: Some(UTILITY_TOKEN.to_owned()),
             bond_cost_in_utility_tokens: bond_cost(),
+            initial_phase: None,
         },
     );
 
@@ -100,6 +101,7 @@ fn instantiation_fails_when_wrong_case_address() {
             astro_token: ASTRO_TOKEN.to_owned(),
             utility_token: Some(UTILITY_TOKEN.to_owned()),
             bond_cost_in_utility_tokens: Decimal::from_str("0.5").unwrap(),
+            initial_phase: None,
         },
     );
 
@@ -187,11 +189,13 @@ fn buy_with_cw20_tokens_fails_when_no_active_phase() {
         info,
         ExecuteMsg::Governance {
             msg: GovernanceMsg::Phase {
-                max_discount: Decimal::from_str("0.5").unwrap(),
-                psi_amount_total: Uint128::new(1_000),
-                psi_amount_start: Uint128::new(100),
-                start_time: cur_time + 1,
-                end_time: cur_time + 2,
+                phase: Phase {
+                    max_discount: Decimal::from_str("0.5").unwrap(),
+                    psi_amount_total: Uint128::new(1_000),
+                    psi_amount_start: Uint128::new(100),
+                    start_time: cur_time + 1,
+                    end_time: cur_time + 2,
+                },
             },
         },
     )
@@ -227,11 +231,13 @@ fn buy_with_cw20_tokens_fails_when_no_active_phase() {
         info,
         ExecuteMsg::Governance {
             msg: GovernanceMsg::Phase {
-                max_discount: Decimal::from_str("0.5").unwrap(),
-                psi_amount_total: Uint128::new(1_000),
-                psi_amount_start: Uint128::new(100),
-                start_time: cur_time + 1,
-                end_time: cur_time + 2,
+                phase: Phase {
+                    max_discount: Decimal::from_str("0.5").unwrap(),
+                    psi_amount_total: Uint128::new(1_000),
+                    psi_amount_start: Uint128::new(100),
+                    start_time: cur_time + 1,
+                    end_time: cur_time + 2,
+                },
             },
         },
     )
@@ -972,11 +978,13 @@ fn buy_with_coins_fails_when_no_active_phase() {
         info,
         ExecuteMsg::Governance {
             msg: GovernanceMsg::Phase {
-                max_discount: Decimal::from_str("0.5").unwrap(),
-                psi_amount_total: Uint128::new(1_000),
-                psi_amount_start: Uint128::new(100),
-                start_time: cur_time + 1,
-                end_time: cur_time + 2,
+                phase: Phase {
+                    max_discount: Decimal::from_str("0.5").unwrap(),
+                    psi_amount_total: Uint128::new(1_000),
+                    psi_amount_start: Uint128::new(100),
+                    start_time: cur_time + 1,
+                    end_time: cur_time + 2,
+                },
             },
         },
     )
@@ -1007,11 +1015,13 @@ fn buy_with_coins_fails_when_no_active_phase() {
         info,
         ExecuteMsg::Governance {
             msg: GovernanceMsg::Phase {
-                max_discount: Decimal::from_str("0.5").unwrap(),
-                psi_amount_total: Uint128::new(1_000),
-                psi_amount_start: Uint128::new(100),
-                start_time: cur_time + 1,
-                end_time: cur_time + 2,
+                phase: Phase {
+                    max_discount: Decimal::from_str("0.5").unwrap(),
+                    psi_amount_total: Uint128::new(1_000),
+                    psi_amount_start: Uint128::new(100),
+                    start_time: cur_time + 1,
+                    end_time: cur_time + 2,
+                },
             },
         },
     )
@@ -1692,11 +1702,13 @@ fn invalid_phase() {
         info.clone(),
         ExecuteMsg::Governance {
             msg: GovernanceMsg::Phase {
-                max_discount: Decimal::zero(),
-                psi_amount_total: Uint128::new(10),
-                psi_amount_start: Uint128::new(100),
-                start_time: 0,
-                end_time,
+                phase: Phase {
+                    max_discount: Decimal::zero(),
+                    psi_amount_total: Uint128::new(10),
+                    psi_amount_start: Uint128::new(100),
+                    start_time: 0,
+                    end_time,
+                },
             },
         },
     );
@@ -1708,11 +1720,13 @@ fn invalid_phase() {
         info.clone(),
         ExecuteMsg::Governance {
             msg: GovernanceMsg::Phase {
-                max_discount: Decimal::one(),
-                psi_amount_total: Uint128::new(1_000),
-                psi_amount_start: Uint128::new(100),
-                start_time: 0,
-                end_time,
+                phase: Phase {
+                    max_discount: Decimal::one(),
+                    psi_amount_total: Uint128::new(1_000),
+                    psi_amount_start: Uint128::new(100),
+                    start_time: 0,
+                    end_time,
+                },
             },
         },
     );
@@ -1724,11 +1738,13 @@ fn invalid_phase() {
         info.clone(),
         ExecuteMsg::Governance {
             msg: GovernanceMsg::Phase {
-                max_discount: Decimal::zero(),
-                psi_amount_total: Uint128::new(1_000),
-                psi_amount_start: Uint128::new(100),
-                start_time: end_time,
-                end_time: 0,
+                phase: Phase {
+                    max_discount: Decimal::zero(),
+                    psi_amount_total: Uint128::new(1_000),
+                    psi_amount_start: Uint128::new(100),
+                    start_time: end_time,
+                    end_time: 0,
+                },
             },
         },
     );
@@ -1740,11 +1756,13 @@ fn invalid_phase() {
         info,
         ExecuteMsg::Governance {
             msg: GovernanceMsg::Phase {
-                max_discount: Decimal::zero(),
-                psi_amount_total: Uint128::new(1_000),
-                psi_amount_start: Uint128::new(100),
-                start_time: 0,
-                end_time: end_time - 2,
+                phase: Phase {
+                    max_discount: Decimal::zero(),
+                    psi_amount_total: Uint128::new(1_000),
+                    psi_amount_start: Uint128::new(100),
+                    start_time: 0,
+                    end_time: end_time - 2,
+                },
             },
         },
     );
@@ -1764,11 +1782,13 @@ fn phase() {
         info,
         ExecuteMsg::Governance {
             msg: GovernanceMsg::Phase {
-                max_discount: Decimal::from_str("0.5").unwrap(),
-                psi_amount_total: Uint128::new(1_000),
-                psi_amount_start: Uint128::new(100),
-                start_time: 0,
-                end_time,
+                phase: Phase {
+                    max_discount: Decimal::from_str("0.5").unwrap(),
+                    psi_amount_total: Uint128::new(1_000),
+                    psi_amount_start: Uint128::new(100),
+                    start_time: 0,
+                    end_time,
+                },
             },
         },
     );
@@ -1781,11 +1801,13 @@ fn phase() {
     );
     assert_eq!(
         PhaseResponse {
-            max_discount: Decimal::from_str("0.5").unwrap(),
-            psi_amount_total: Uint128::new(1_000),
-            psi_amount_start: Uint128::new(100),
-            start_time: 0,
-            end_time,
+            phase: Phase {
+                max_discount: Decimal::from_str("0.5").unwrap(),
+                psi_amount_total: Uint128::new(1_000),
+                psi_amount_start: Uint128::new(100),
+                start_time: 0,
+                end_time,
+            }
         },
         from_binary(&query_resp.unwrap()).unwrap()
     );
@@ -1803,11 +1825,13 @@ fn do_not_accept_any_governance_msg_from_non_governance_contract() {
         info.clone(),
         ExecuteMsg::Governance {
             msg: GovernanceMsg::Phase {
-                max_discount: Decimal::one(),
-                psi_amount_total: Uint128::zero(),
-                psi_amount_start: Uint128::zero(),
-                start_time: 0,
-                end_time: 0,
+                phase: Phase {
+                    max_discount: Decimal::one(),
+                    psi_amount_total: Uint128::zero(),
+                    psi_amount_start: Uint128::zero(),
+                    start_time: 0,
+                    end_time: 0,
+                },
             },
         },
     );

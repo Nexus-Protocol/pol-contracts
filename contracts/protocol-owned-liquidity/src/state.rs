@@ -1,6 +1,7 @@
 use astroport::asset::{AssetInfo, PairInfo};
 use cosmwasm_std::{Addr, Attribute, Decimal, Env, Order, StdError, StdResult, Storage, Uint128};
 use cw_storage_plus::{Item, Map};
+use nexus_pol_services::pol::Phase as PolPhase;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -43,6 +44,30 @@ pub struct Phase {
     pub end_time: u64,
 }
 
+impl From<PolPhase> for Phase {
+    fn from(value: PolPhase) -> Self {
+        Self {
+            max_discount: value.max_discount,
+            psi_amount_total: value.psi_amount_total,
+            psi_amount_start: value.psi_amount_start,
+            start_time: value.start_time,
+            end_time: value.end_time,
+        }
+    }
+}
+
+impl From<Phase> for PolPhase {
+    fn from(value: Phase) -> Self {
+        Self {
+            max_discount: value.max_discount,
+            psi_amount_total: value.psi_amount_total,
+            psi_amount_start: value.psi_amount_start,
+            start_time: value.start_time,
+            end_time: value.end_time,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct State {
     pub psi_amount_sold: Uint128,
@@ -67,7 +92,7 @@ impl TokenBalance {
 
 impl From<(Addr, String, Uint128)> for TokenBalance {
     fn from(value: (Addr, String, Uint128)) -> Self {
-        TokenBalance::new(value.0, value.1, value.2)
+        Self::new(value.0, value.1, value.2)
     }
 }
 

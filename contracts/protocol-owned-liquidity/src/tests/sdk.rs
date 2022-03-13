@@ -2,12 +2,12 @@ use astroport::asset::{AssetInfo, PairInfo};
 use astroport::factory::PairType;
 use cosmwasm_std::testing::{self, MockApi};
 use cosmwasm_std::{to_binary, Addr, Decimal, Env, MemoryStorage, OwnedDeps, Uint128};
-use nexus_pol_services::pol::{ExecuteMsg, GovernanceMsg, InstantiateMsg};
+use nexus_pol_services::pol::InstantiateMsg;
 use std::str::FromStr;
 
-use crate::contract::{execute, instantiate};
-use crate::state::Phase;
+use crate::contract::instantiate;
 use crate::tests::mock_querier::*;
+use nexus_pol_services::pol::Phase;
 
 pub const GOVERNANCE: &str = "governance";
 pub const PSI_TOKEN: &str = "psi_token";
@@ -110,7 +110,7 @@ pub fn instantiate_properly(deps: &mut Deps, env: Env, pairs: Vec<PairInfo>, pha
 
     instantiate(
         deps.as_mut(),
-        env.clone(),
+        env,
         info,
         InstantiateMsg {
             governance: GOVERNANCE.to_owned(),
@@ -127,26 +127,8 @@ pub fn instantiate_properly(deps: &mut Deps, env: Env, pairs: Vec<PairInfo>, pha
             astro_token: ASTRO_TOKEN.to_owned(),
             utility_token: Some(UTILITY_TOKEN.to_owned()),
             bond_cost_in_utility_tokens: Decimal::from_str("0.5").unwrap(),
+            initial_phase: phase,
         },
     )
     .unwrap();
-
-    if let Some(phase) = phase {
-        let info = testing::mock_info(GOVERNANCE, &[]);
-        execute(
-            deps.as_mut(),
-            env,
-            info,
-            ExecuteMsg::Governance {
-                msg: GovernanceMsg::Phase {
-                    max_discount: phase.max_discount,
-                    psi_amount_total: phase.psi_amount_total,
-                    psi_amount_start: phase.psi_amount_start,
-                    start_time: phase.start_time,
-                    end_time: phase.end_time,
-                },
-            },
-        )
-        .unwrap();
-    }
 }
